@@ -61,6 +61,16 @@ export interface ADEUpgradeHint {
   scoreDifference: number;
 }
 
+export interface ADEProviderHint {
+  recommendedModel: {
+    id: string;
+    name: string;
+    provider: string;
+  };
+  reason: string;
+  scoreDifference: number;
+}
+
 export interface ADEFallback {
   supported: boolean;
   category: string;
@@ -81,6 +91,7 @@ export interface ADEResponse {
     selectionMs: number;
   };
   upgradeHint?: ADEUpgradeHint | null;
+  providerHint?: ADEProviderHint | null;
   fallback?: ADEFallback | null;
 }
 
@@ -124,6 +135,7 @@ export interface SSERoutingData {
   adeLatencyMs: number;
   isManualSelection: boolean;
   upgradeHint: ADEUpgradeHint | null;
+  providerHint: ADEProviderHint | null;
 }
 
 export interface SSEDoneData {
