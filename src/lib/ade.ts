@@ -9,6 +9,7 @@ interface ADERequest {
   prompt: string;
   modality: string;
   userTier: string;
+  availableProviders?: string[];
   context?: ADERequestContext;
 }
 
@@ -26,6 +27,10 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
     modality: request.modality,
     userTier: request.userTier,
   };
+
+  if (request.availableProviders && request.availableProviders.length > 0) {
+    body.availableProviders = request.availableProviders;
+  }
 
   if (request.context?.conversationId || request.context?.previousModelUsed) {
     body.context = {

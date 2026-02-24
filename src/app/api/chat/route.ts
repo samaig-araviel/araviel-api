@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { callADE } from "@/lib/ade";
 import { calculateCost } from "@/lib/cost";
-import { getProvider } from "@/lib/providers";
+import { getProvider, getAvailableProviders } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
@@ -91,11 +91,14 @@ async function handleChat(
     // 5. Get previous model for conversation coherence
     const previousModelUsed = await getPreviousModelId(conversationId);
 
-    // 6. Call ADE
+    // 6. Detect available providers and call ADE
+    const availableProviders = getAvailableProviders();
+
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
       prompt: chatReq.message,
       modality: chatReq.modality ?? "text",
       userTier: chatReq.userTier ?? "free",
+      availableProviders,
       context: {
         conversationId,
         previousModelUsed,
@@ -158,6 +161,7 @@ async function handleChat(
         adeLatencyMs,
         isManualSelection,
         upgradeHint: adeResponse.upgradeHint ?? null,
+        providerHint: adeResponse.providerHint ?? null,
       },
     });
 

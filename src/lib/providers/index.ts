@@ -7,6 +7,23 @@ import { PerplexityProvider } from "./perplexity";
 
 const providerCache: Partial<Record<SupportedProvider, AIProvider>> = {};
 
+const PROVIDER_ENV_KEYS: Record<SupportedProvider, string> = {
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  google: "GOOGLE_API_KEY",
+  perplexity: "PERPLEXITY_API_KEY",
+};
+
+/**
+ * Returns the list of providers that have API keys configured.
+ * Used to tell ADE which providers the backend can actually call.
+ */
+export function getAvailableProviders(): SupportedProvider[] {
+  return (Object.entries(PROVIDER_ENV_KEYS) as [SupportedProvider, string][])
+    .filter(([, envKey]) => !!process.env[envKey])
+    .map(([provider]) => provider);
+}
+
 export function getProvider(providerName: SupportedProvider): AIProvider {
   if (providerCache[providerName]) {
     return providerCache[providerName];
