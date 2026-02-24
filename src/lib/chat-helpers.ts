@@ -91,29 +91,9 @@ export async function saveUserMessage(
   return id;
 }
 
-export async function createAssistantMessage(
-  conversationId: string
-): Promise<string> {
-  const supabase = getSupabase();
-  const id = randomUUID();
-
-  const { error } = await supabase.from("messages").insert({
-    id,
-    conversation_id: conversationId,
-    role: "assistant",
-    content: "",
-    created_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    throw new Error(`Failed to create assistant message: ${error.message}`);
-  }
-
-  return id;
-}
-
-export async function updateAssistantMessage(
+export async function insertAssistantMessage(
   messageId: string,
+  conversationId: string,
   data: {
     content: string;
     modelUsed: Record<string, unknown>;
@@ -126,24 +106,25 @@ export async function updateAssistantMessage(
 ): Promise<void> {
   const supabase = getSupabase();
 
-  const { error } = await supabase
-    .from("messages")
-    .update({
-      content: data.content,
-      model_used: data.modelUsed,
-      tokens_input: data.usage.inputTokens,
-      tokens_output: data.usage.outputTokens,
-      tokens_reasoning: data.usage.reasoningTokens,
-      tokens_cached: data.usage.cachedTokens,
-      cost_usd: data.costUsd,
-      latency_ms: data.latencyMs,
-      ade_latency_ms: data.adeLatencyMs,
-      extended_data: data.extendedData,
-    })
-    .eq("id", messageId);
+  const { error } = await supabase.from("messages").insert({
+    id: messageId,
+    conversation_id: conversationId,
+    role: "assistant",
+    content: data.content,
+    model_used: data.modelUsed,
+    tokens_input: data.usage.inputTokens,
+    tokens_output: data.usage.outputTokens,
+    tokens_reasoning: data.usage.reasoningTokens,
+    tokens_cached: data.usage.cachedTokens,
+    cost_usd: data.costUsd,
+    latency_ms: data.latencyMs,
+    ade_latency_ms: data.adeLatencyMs,
+    extended_data: data.extendedData,
+    created_at: new Date().toISOString(),
+  });
 
   if (error) {
-    throw new Error(`Failed to update assistant message: ${error.message}`);
+    throw new Error(`Failed to insert assistant message: ${error.message}`);
   }
 }
 

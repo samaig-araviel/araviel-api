@@ -3,14 +3,14 @@ import { callADE } from "@/lib/ade";
 import { calculateCost } from "@/lib/cost";
 import { getProvider } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
-import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEAnalysis } from "@/lib/types";
+import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
+import { randomUUID } from "crypto";
 import {
   validateChatRequest,
   getOrCreateConversation,
   saveUserMessage,
-  createAssistantMessage,
-  updateAssistantMessage,
+  insertAssistantMessage,
   updateConversationTimestamp,
   saveRoutingLog,
   saveApiCallLog,
@@ -138,13 +138,10 @@ async function handleChat(
 
     const { model, backupModels, isManualSelection } = resolved;
 
-    // 9. Create assistant message record (empty, to get messageId)
-    const messageId = await createAssistantMessage(conversationId);
+    // 9. Generate messageId in memory — no DB insert yet
+    const messageId = randomUUID();
 
-    // 10. Save routing log
-    await saveRoutingLog(messageId, adeResponse, adeLatencyMs);
-
-    // 11. Send routing event
+    // 10. Send routing event (messageId is known, but not persisted)
     await sendSSE(writer, encoder, {
       type: "routing",
       data: {
@@ -164,10 +161,12 @@ async function handleChat(
       },
     });
 
-    // 12. Stream from provider
+    // 11. Stream from provider
     const systemPrompt = buildSystemPrompt();
     const enableWebSearch = shouldEnableWebSearch(adeResponse.analysis);
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
+
+    const apiCallLogs: ApiCallLogEntry[] = [];
 
     const streamResult = await streamFromProvider(
       model,
@@ -177,10 +176,10 @@ async function handleChat(
       enableThinking,
       writer,
       encoder,
-      messageId
+      apiCallLogs
     );
 
-    // 13. If primary failed, try backup
+    // 12. If primary failed, try backup
     if (!streamResult.success) {
       const backup = findSupportedBackup(backupModels);
 
@@ -201,7 +200,7 @@ async function handleChat(
           enableThinking,
           writer,
           encoder,
-          messageId
+          apiCallLogs
         );
 
         if (!backupResult.success) {
@@ -224,6 +223,7 @@ async function handleChat(
           backupModels,
           adeResponse,
           adeLatencyMs,
+          apiCallLogs,
           writer,
           encoder
         );
@@ -247,6 +247,7 @@ async function handleChat(
         backupModels,
         adeResponse,
         adeLatencyMs,
+        apiCallLogs,
         writer,
         encoder
       );
@@ -273,6 +274,14 @@ interface StreamResult {
   error?: string;
 }
 
+interface ApiCallLogEntry {
+  provider: string;
+  modelId: string;
+  statusCode: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
 async function streamFromProvider(
   model: ModelInfo,
   systemPrompt: string,
@@ -281,7 +290,7 @@ async function streamFromProvider(
   enableThinking: boolean,
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder,
-  messageId: string
+  apiCallLogs: ApiCallLogEntry[]
 ): Promise<StreamResult> {
   const start = Date.now();
   let content = "";
@@ -358,7 +367,12 @@ async function streamFromProvider(
 
     const latencyMs = Date.now() - start;
 
-    await saveApiCallLog(messageId, model.provider, model.id, 200, latencyMs);
+    apiCallLogs.push({
+      provider: model.provider,
+      modelId: model.id,
+      statusCode: 200,
+      latencyMs,
+    });
 
     return {
       success: true,
@@ -372,14 +386,13 @@ async function streamFromProvider(
     const latencyMs = Date.now() - start;
     const errorMessage = err instanceof Error ? err.message : "Unknown provider error";
 
-    await saveApiCallLog(
-      messageId,
-      model.provider,
-      model.id,
-      500,
+    apiCallLogs.push({
+      provider: model.provider,
+      modelId: model.id,
+      statusCode: 500,
       latencyMs,
-      errorMessage
-    );
+      errorMessage,
+    });
 
     return {
       success: false,
@@ -399,8 +412,9 @@ async function finalize(
   result: StreamResult,
   model: ModelInfo,
   backupModels: ModelInfo[],
-  adeResponse: { analysis: ADEAnalysis },
+  adeResponse: ADEResponse,
   adeLatencyMs: number,
+  apiCallLogs: ApiCallLogEntry[],
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder
 ): Promise<void> {
@@ -426,7 +440,8 @@ async function finalize(
     extendedData.citations = result.citations;
   }
 
-  await updateAssistantMessage(messageId, {
+  // Insert assistant message only now that we have content
+  await insertAssistantMessage(messageId, conversationId, {
     content: result.content,
     modelUsed,
     usage: result.usage,
@@ -435,6 +450,20 @@ async function finalize(
     adeLatencyMs,
     extendedData,
   });
+
+  // Save routing log and API call logs now that message exists
+  await saveRoutingLog(messageId, adeResponse, adeLatencyMs);
+
+  for (const log of apiCallLogs) {
+    await saveApiCallLog(
+      messageId,
+      log.provider,
+      log.modelId,
+      log.statusCode,
+      log.latencyMs,
+      log.errorMessage
+    );
+  }
 
   await updateConversationTimestamp(conversationId);
 
