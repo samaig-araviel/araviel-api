@@ -25,7 +25,14 @@ src/
         route.ts                   # List and create conversations
         [id]/
           route.ts                 # Get single conversation
-          messages/route.ts        # Get messages for a conversation
+          messages/
+            route.ts               # Get messages for a conversation
+            [messageId]/
+              sub-conversations/
+                route.ts           # Create and list sub-conversations for a message
+      sub-conversations/
+        [subId]/
+          messages/route.ts        # Get messages for a sub-conversation
       health/route.ts              # Health check
       cors.ts                      # CORS configuration
   lib/
@@ -99,7 +106,7 @@ The API will be available at `http://localhost:3000`.
 
 ## Database Schema
 
-Four tables are required in Supabase. Create them before running the API.
+Five tables are required in Supabase. Create them before running the API.
 
 ### conversations
 
@@ -112,25 +119,41 @@ Four tables are required in Supabase. Create them before running the API.
 
 ### messages
 
-| Column           | Type        | Description                              |
-| ---------------- | ----------- | ---------------------------------------- |
-| id               | text (PK)   | UUID                                     |
-| conversation_id  | text (FK)   | References conversations.id              |
-| role             | text        | "user" or "assistant"                    |
-| content          | text        | Message content                          |
-| model_used       | jsonb       | ADE routing result (assistant messages)  |
-| tokens_input     | int4        | Input token count                        |
-| tokens_output    | int4        | Output token count                       |
-| tokens_reasoning | int4        | Reasoning token count                    |
-| tokens_cached    | int4        | Cached token count                       |
-| cost_usd         | numeric     | Cost in USD                              |
-| latency_ms       | int4        | Provider response latency                |
-| ade_latency_ms   | int4        | ADE routing latency                      |
-| extended_data    | jsonb       | Thinking content, citations, etc.        |
-| tool_calls       | jsonb       | Tool call data                           |
-| tool_call_id     | text        | Tool call identifier                     |
-| attachments      | jsonb       | File attachments                         |
-| created_at       | timestamptz | Creation timestamp                       |
+| Column               | Type        | Description                                      |
+| -------------------- | ----------- | ------------------------------------------------ |
+| id                   | text (PK)   | UUID                                             |
+| conversation_id      | text (FK)   | References conversations.id                      |
+| sub_conversation_id  | text (FK)   | References sub_conversations.id (nullable)       |
+| role                 | text        | "user" or "assistant"                            |
+| content              | text        | Message content                                  |
+| model_used           | jsonb       | ADE routing result (assistant messages)          |
+| tokens_input         | int4        | Input token count                                |
+| tokens_output        | int4        | Output token count                               |
+| tokens_reasoning     | int4        | Reasoning token count                            |
+| tokens_cached        | int4        | Cached token count                               |
+| cost_usd             | numeric     | Cost in USD                                      |
+| latency_ms           | int4        | Provider response latency                        |
+| ade_latency_ms       | int4        | ADE routing latency                              |
+| extended_data        | jsonb       | Thinking content, citations, etc.                |
+| tool_calls           | jsonb       | Tool call data                                   |
+| tool_call_id         | text        | Tool call identifier                             |
+| attachments          | jsonb       | File attachments                                 |
+| created_at           | timestamptz | Creation timestamp                               |
+
+When `sub_conversation_id` is NULL, the message belongs to the main conversation thread. When set, it belongs to a sub-conversation.
+
+### sub_conversations
+
+| Column            | Type        | Description                          |
+| ----------------- | ----------- | ------------------------------------ |
+| id                | text (PK)   | UUID                                 |
+| conversation_id   | text (FK)   | References conversations.id          |
+| parent_message_id | text (FK)   | References messages.id               |
+| highlighted_text  | text        | The text the user selected/highlighted |
+| created_at        | timestamptz | Creation timestamp                   |
+| updated_at        | timestamptz | Last update timestamp                |
+
+Sub-conversations are created when a user highlights text in an assistant message and starts a follow-up thread about that specific text. Each sub-conversation is anchored to the parent message it originated from.
 
 ### routing_logs
 
@@ -172,11 +195,14 @@ Main streaming chat endpoint. Accepts a message, routes it through ADE, calls th
 {
   "message": "How do I optimize a React component?",
   "conversationId": "optional-uuid",
+  "subConversationId": "optional-uuid",
   "userTier": "free",
   "modality": "text",
   "selectedModelId": "optional-model-id"
 }
 ```
+
+When `subConversationId` is provided, the message is saved as part of that sub-conversation thread. The conversation history sent to the AI provider will include the highlighted text as context.
 
 **Response:** Server-Sent Events stream with the following event types:
 
@@ -208,9 +234,37 @@ Get a single conversation by ID.
 
 ### GET /api/conversations/[id]/messages
 
-Get all messages for a conversation with pagination.
+Get all messages for a conversation with pagination. Only returns main conversation messages (sub-conversation messages are excluded).
 
 **Query params:** `limit` (default 50), `offset` (default 0)
+
+### POST /api/conversations/[id]/messages/[messageId]/sub-conversations
+
+Create a sub-conversation anchored to a specific assistant message.
+
+**Request body:**
+
+```json
+{
+  "highlightedText": "The text the user selected"
+}
+```
+
+**Response:** `{ id, conversationId, parentMessageId, highlightedText, createdAt, updatedAt }`
+
+### GET /api/conversations/[id]/messages/[messageId]/sub-conversations
+
+List all sub-conversations for a specific message.
+
+**Response:** `{ subConversations: [{ id, conversationId, parentMessageId, highlightedText, createdAt, updatedAt }] }`
+
+### GET /api/sub-conversations/[subId]/messages
+
+Get all messages for a sub-conversation with pagination. Includes the sub-conversation metadata (highlighted text, parent message ID).
+
+**Query params:** `limit` (default 50), `offset` (default 0)
+
+**Response:** `{ subConversation: { id, conversationId, parentMessageId, highlightedText }, messages: [...] }`
 
 ### GET /api/health
 

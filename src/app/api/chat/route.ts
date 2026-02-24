@@ -21,6 +21,7 @@ import {
   shouldEnableWebSearch,
   shouldEnableThinking,
   findSupportedBackup,
+  validateSubConversation,
 } from "@/lib/chat-helpers";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
@@ -76,17 +77,25 @@ async function handleChat(
     const body = await request.json();
     const chatReq = validateChatRequest(body);
 
-    // 2. Get or create conversation
-    const conversationId = await getOrCreateConversation(
-      chatReq.conversationId,
-      chatReq.message
-    );
+    // 2. Get or create conversation (for sub-conversations, validate and use the parent conversation)
+    let conversationId: string;
+    const subConversationId = chatReq.subConversationId;
+
+    if (subConversationId) {
+      const subConv = await validateSubConversation(subConversationId);
+      conversationId = subConv.conversationId;
+    } else {
+      conversationId = await getOrCreateConversation(
+        chatReq.conversationId,
+        chatReq.message
+      );
+    }
 
     // 3. Save user message
-    await saveUserMessage(conversationId, chatReq.message);
+    await saveUserMessage(conversationId, chatReq.message, subConversationId);
 
-    // 4. Fetch conversation history
-    const history = await fetchConversationHistory(conversationId);
+    // 4. Fetch conversation history (sub-conversation history includes highlighted text context)
+    const history = await fetchConversationHistory(conversationId, subConversationId);
 
     // 5. Get previous model for conversation coherence
     const previousModelUsed = await getPreviousModelId(conversationId);
@@ -149,6 +158,7 @@ async function handleChat(
       type: "routing",
       data: {
         conversationId,
+        subConversationId: subConversationId ?? null,
         messageId,
         model,
         backupModels,
@@ -229,7 +239,8 @@ async function handleChat(
           adeLatencyMs,
           apiCallLogs,
           writer,
-          encoder
+          encoder,
+          subConversationId
         );
       } else {
         await sendSSE(writer, encoder, {
@@ -253,7 +264,8 @@ async function handleChat(
         adeLatencyMs,
         apiCallLogs,
         writer,
-        encoder
+        encoder,
+        subConversationId
       );
     }
   } catch (err) {
@@ -420,7 +432,8 @@ async function finalize(
   adeLatencyMs: number,
   apiCallLogs: ApiCallLogEntry[],
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  encoder: TextEncoder
+  encoder: TextEncoder,
+  subConversationId?: string
 ): Promise<void> {
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
@@ -453,6 +466,7 @@ async function finalize(
     latencyMs: result.latencyMs,
     adeLatencyMs,
     extendedData,
+    subConversationId,
   });
 
   // Save routing log and API call logs now that message exists
@@ -476,6 +490,7 @@ async function finalize(
     data: {
       messageId,
       conversationId,
+      subConversationId: subConversationId ?? null,
       usage: {
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,

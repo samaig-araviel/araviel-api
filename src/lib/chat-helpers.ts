@@ -7,6 +7,7 @@ import type {
   ConversationMessage,
   DBConversation,
   DBMessage,
+  DBSubConversation,
   ModelInfo,
   TokenUsage,
 } from "@/lib/types";
@@ -25,6 +26,7 @@ export function validateChatRequest(body: unknown): ChatRequest {
 
   return {
     conversationId: typeof req.conversationId === "string" ? req.conversationId : undefined,
+    subConversationId: typeof req.subConversationId === "string" ? req.subConversationId : undefined,
     message: req.message.trim(),
     userTier: typeof req.userTier === "string" ? req.userTier : "free",
     modality: typeof req.modality === "string" ? req.modality : "text",
@@ -71,7 +73,8 @@ export async function getOrCreateConversation(
 
 export async function saveUserMessage(
   conversationId: string,
-  content: string
+  content: string,
+  subConversationId?: string
 ): Promise<string> {
   const supabase = getSupabase();
   const id = randomUUID();
@@ -79,6 +82,7 @@ export async function saveUserMessage(
   const { error } = await supabase.from("messages").insert({
     id,
     conversation_id: conversationId,
+    sub_conversation_id: subConversationId ?? null,
     role: "user",
     content,
     created_at: new Date().toISOString(),
@@ -102,6 +106,7 @@ export async function insertAssistantMessage(
     latencyMs: number;
     adeLatencyMs: number;
     extendedData: Record<string, unknown>;
+    subConversationId?: string;
   }
 ): Promise<void> {
   const supabase = getSupabase();
@@ -109,6 +114,7 @@ export async function insertAssistantMessage(
   const { error } = await supabase.from("messages").insert({
     id: messageId,
     conversation_id: conversationId,
+    sub_conversation_id: data.subConversationId ?? null,
     role: "assistant",
     content: data.content,
     model_used: data.modelUsed,
@@ -188,14 +194,53 @@ export async function saveApiCallLog(
 }
 
 export async function fetchConversationHistory(
-  conversationId: string
+  conversationId: string,
+  subConversationId?: string
 ): Promise<ConversationMessage[]> {
   const supabase = getSupabase();
 
+  if (subConversationId) {
+    // For sub-conversations: fetch the highlighted text as context,
+    // then return the sub-conversation's own message history
+    const { data: subConv } = await supabase
+      .from("sub_conversations")
+      .select("highlighted_text")
+      .eq("id", subConversationId)
+      .single();
+
+    const contextMessages: ConversationMessage[] = [];
+    if (subConv?.highlighted_text) {
+      contextMessages.push({
+        role: "system",
+        content: `The user is asking a follow-up question about this specific text they highlighted from a previous response:\n\n"${subConv.highlighted_text}"\n\nRespond in the context of this highlighted text.`,
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("messages")
+      .select("role, content")
+      .eq("sub_conversation_id", subConversationId)
+      .order("created_at", { ascending: true })
+      .limit(20);
+
+    if (error) {
+      throw new Error(`Failed to fetch sub-conversation history: ${error.message}`);
+    }
+
+    const messages = (data ?? []).map((msg: Pick<DBMessage, "role" | "content">) => ({
+      role: msg.role as ConversationMessage["role"],
+      content: msg.content,
+    }));
+
+    return [...contextMessages, ...messages];
+  }
+
+  // Main conversation: exclude sub-conversation messages
   const { data, error } = await supabase
     .from("messages")
     .select("role, content")
     .eq("conversation_id", conversationId)
+    .is("sub_conversation_id", null)
     .order("created_at", { ascending: true })
     .limit(20);
 
@@ -337,6 +382,86 @@ export function findSupportedBackup(
   return backupModels.find((m) => SUPPORTED_PROVIDERS.has(m.provider));
 }
 
+export async function createSubConversation(
+  conversationId: string,
+  parentMessageId: string,
+  highlightedText: string
+): Promise<DBSubConversation> {
+  const supabase = getSupabase();
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  // Verify parent message exists and belongs to the conversation
+  const { data: msg, error: msgError } = await supabase
+    .from("messages")
+    .select("id")
+    .eq("id", parentMessageId)
+    .eq("conversation_id", conversationId)
+    .single();
+
+  if (msgError || !msg) {
+    throw new Error("Parent message not found in this conversation");
+  }
+
+  const { error } = await supabase.from("sub_conversations").insert({
+    id,
+    conversation_id: conversationId,
+    parent_message_id: parentMessageId,
+    highlighted_text: highlightedText,
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (error) {
+    throw new Error(`Failed to create sub-conversation: ${error.message}`);
+  }
+
+  return {
+    id,
+    conversation_id: conversationId,
+    parent_message_id: parentMessageId,
+    highlighted_text: highlightedText,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+export async function getSubConversations(
+  parentMessageId: string
+): Promise<DBSubConversation[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from("sub_conversations")
+    .select("*")
+    .eq("parent_message_id", parentMessageId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to fetch sub-conversations: ${error.message}`);
+  }
+
+  return (data ?? []) as DBSubConversation[];
+}
+
+export async function validateSubConversation(
+  subConversationId: string
+): Promise<{ conversationId: string }> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from("sub_conversations")
+    .select("conversation_id")
+    .eq("id", subConversationId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Sub-conversation not found: ${subConversationId}`);
+  }
+
+  return { conversationId: data.conversation_id };
+}
+
 export { randomUUID };
 
-export type { DBConversation, DBMessage };
+export type { DBConversation, DBMessage, DBSubConversation };

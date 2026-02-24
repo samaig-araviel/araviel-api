@@ -6,7 +6,7 @@ import { corsHeaders, handleCorsOptions } from "../../../cors";
 interface FormattedMessage {
   id: string;
   conversationId: string;
-  subConversationId?: string | null;
+  subConversationId: string;
   role: string;
   content: string;
   createdAt: string;
@@ -29,6 +29,7 @@ function formatMessage(msg: DBMessage): FormattedMessage {
   const base: FormattedMessage = {
     id: msg.id,
     conversationId: msg.conversation_id,
+    subConversationId: msg.sub_conversation_id!,
     role: msg.role,
     content: msg.content,
     createdAt: msg.created_at,
@@ -41,7 +42,6 @@ function formatMessage(msg: DBMessage): FormattedMessage {
   const modelUsed = msg.model_used as {
     model?: ModelInfo;
     backupModels?: ModelInfo[];
-    analysis?: Record<string, unknown>;
   } | null;
 
   const extendedData = msg.extended_data as {
@@ -76,26 +76,26 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ subId: string }> }
 ) {
   try {
-    const { id: conversationId } = await params;
+    const { subId } = await params;
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 200);
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
     const supabase = getSupabase();
 
-    // Verify conversation exists
-    const { data: conv, error: convError } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("id", conversationId)
+    // Verify sub-conversation exists and get its metadata
+    const { data: subConv, error: subConvError } = await supabase
+      .from("sub_conversations")
+      .select("id, conversation_id, parent_message_id, highlighted_text")
+      .eq("id", subId)
       .single();
 
-    if (convError || !conv) {
+    if (subConvError || !subConv) {
       return NextResponse.json(
-        { error: "Conversation not found" },
+        { error: "Sub-conversation not found" },
         { status: 404, headers: corsHeaders(request.headers.get("origin")) }
       );
     }
@@ -103,8 +103,7 @@ export async function GET(
     const { data, error } = await supabase
       .from("messages")
       .select("*")
-      .eq("conversation_id", conversationId)
-      .is("sub_conversation_id", null)
+      .eq("sub_conversation_id", subId)
       .order("created_at", { ascending: true })
       .range(offset, offset + limit - 1);
 
@@ -115,10 +114,18 @@ export async function GET(
       );
     }
 
-    const messages = (data as DBMessage[] ?? []).map(formatMessage);
+    const messages = ((data as DBMessage[]) ?? []).map(formatMessage);
 
     return NextResponse.json(
-      { messages },
+      {
+        subConversation: {
+          id: subConv.id,
+          conversationId: subConv.conversation_id,
+          parentMessageId: subConv.parent_message_id,
+          highlightedText: subConv.highlighted_text,
+        },
+        messages,
+      },
       { headers: corsHeaders(request.headers.get("origin")) }
     );
   } catch (err) {

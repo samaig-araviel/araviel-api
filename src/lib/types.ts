@@ -9,6 +9,7 @@ export const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set<SupportedProvide
 
 export interface ChatRequest {
   conversationId?: string;
+  subConversationId?: string;
   message: string;
   userTier?: string;
   modality?: string;
@@ -161,6 +162,7 @@ export interface DBConversation {
 export interface DBMessage {
   id: string;
   conversation_id: string;
+  sub_conversation_id: string | null;
   role: string;
   content: string;
   model_used: Record<string, unknown> | null;
@@ -176,4 +178,13 @@ export interface DBMessage {
   tool_call_id: string | null;
   attachments: unknown | null;
   created_at: string;
+}
+
+export interface DBSubConversation {
+  id: string;
+  conversation_id: string;
+  parent_message_id: string;
+  highlighted_text: string;
+  created_at: string;
+  updated_at: string;
 }
