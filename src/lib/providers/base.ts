@@ -7,6 +7,7 @@ export interface ProviderStreamEvent {
   tool?: string;
   status?: string;
   usage?: TokenUsage;
+  webSearchUsed?: boolean;
   error?: string;
 }
 

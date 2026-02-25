@@ -64,15 +64,21 @@ export class OpenAIProvider implements AIProvider {
           usage.cachedTokens = response.usage.input_tokens_details?.cached_tokens ?? 0;
         }
 
+        let webSearchToolUsed = false;
         for (const item of response.output ?? []) {
+          if (item.type === "web_search_call") {
+            webSearchToolUsed = true;
+          }
           if (item.type === "message" && item.content) {
             for (const part of item.content) {
               if (part.type === "output_text" && part.annotations) {
                 for (const ann of part.annotations) {
                   if (ann.type === "url_citation") {
+                    const citation = ann as typeof ann & { snippet?: string };
                     collectedCitations.push({
                       url: ann.url,
                       title: ann.title ?? ann.url,
+                      snippet: citation.snippet,
                     });
                   }
                 }
@@ -81,11 +87,16 @@ export class OpenAIProvider implements AIProvider {
           }
         }
 
+        const webSearchUsed = collectedCitations.length > 0 || webSearchToolUsed;
+        if (webSearchUsed) {
+          usage.webSearchRequests = 1;
+        }
+
         if (collectedCitations.length > 0) {
           yield { type: "citations", citations: collectedCitations };
         }
 
-        yield { type: "done", usage };
+        yield { type: "done", usage, webSearchUsed };
       }
     }
   }

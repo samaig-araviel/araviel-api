@@ -67,10 +67,13 @@ export class PerplexityProvider implements AIProvider {
       }
     }
 
+    // Perplexity always uses web search — it's built into the service
+    const webSearchUsed = true;
+
     if (collectedCitations.length > 0) {
       yield { type: "citations", citations: collectedCitations };
     }
 
-    yield { type: "done", usage };
+    yield { type: "done", usage, webSearchUsed };
   }
 }

@@ -31,6 +31,7 @@ export function validateChatRequest(body: unknown): ChatRequest {
     userTier: typeof req.userTier === "string" ? req.userTier : "free",
     modality: typeof req.modality === "string" ? req.modality : "text",
     selectedModelId: typeof req.selectedModelId === "string" ? req.selectedModelId : undefined,
+    webSearch: typeof req.webSearch === "boolean" ? req.webSearch : undefined,
   };
 }
 
@@ -360,7 +361,26 @@ export function buildSystemPrompt(): string {
   ].join(" ");
 }
 
-export function shouldEnableWebSearch(analysis: ADEResponse["analysis"]): boolean {
+export function resolveWebSearch(
+  userWebSearch: boolean | undefined,
+  analysis: ADEResponse["analysis"]
+): { shouldUseWebSearch: boolean; webSearchAutoDetected: boolean } {
+  // User explicitly toggled web search on
+  if (userWebSearch === true) {
+    return { shouldUseWebSearch: true, webSearchAutoDetected: false };
+  }
+
+  // User explicitly toggled web search off
+  if (userWebSearch === false) {
+    return { shouldUseWebSearch: false, webSearchAutoDetected: false };
+  }
+
+  // Auto mode: check ADE's webSearchRequired, fall back to intent-based detection
+  const adeRecommends = analysis.webSearchRequired ?? detectWebSearchFromIntent(analysis);
+  return { shouldUseWebSearch: adeRecommends, webSearchAutoDetected: adeRecommends };
+}
+
+function detectWebSearchFromIntent(analysis: ADEResponse["analysis"]): boolean {
   const searchIntents = new Set([
     "research",
     "current_events",

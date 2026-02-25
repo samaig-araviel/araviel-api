@@ -96,6 +96,15 @@ export class AnthropicProvider implements AIProvider {
         ).cache_read_input_tokens ?? 0;
     }
 
+    // Track web search requests from server tool usage
+    const serverToolUse = (
+      finalMessage.usage as unknown as Record<string, unknown>
+    )?.server_tool_use as { web_search_requests?: number } | undefined;
+    const webSearchRequests = serverToolUse?.web_search_requests ?? 0;
+    if (webSearchRequests > 0) {
+      usage.webSearchRequests = webSearchRequests;
+    }
+
     for (const block of finalMessage.content) {
       if (block.type === "web_search_tool_result") {
         const searchBlock = block as unknown as {
@@ -104,6 +113,8 @@ export class AnthropicProvider implements AIProvider {
             type: string;
             url?: string;
             title?: string;
+            snippet?: string;
+            cited_text?: string;
           }>;
         };
         for (const result of searchBlock.content ?? []) {
@@ -111,16 +122,19 @@ export class AnthropicProvider implements AIProvider {
             collectedCitations.push({
               url: result.url,
               title: result.title ?? result.url,
+              snippet: result.cited_text ?? result.snippet,
             });
           }
         }
       }
     }
 
+    const webSearchUsed = collectedCitations.length > 0 || webSearchRequests > 0;
+
     if (collectedCitations.length > 0) {
       yield { type: "citations", citations: collectedCitations };
     }
 
-    yield { type: "done", usage };
+    yield { type: "done", usage, webSearchUsed };
   }
 }

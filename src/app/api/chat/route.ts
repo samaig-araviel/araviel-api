@@ -18,7 +18,7 @@ import {
   getPreviousModelId,
   resolveModel,
   buildSystemPrompt,
-  shouldEnableWebSearch,
+  resolveWebSearch,
   shouldEnableThinking,
   findSupportedBackup,
   validateSubConversation,
@@ -153,7 +153,13 @@ async function handleChat(
     // 9. Generate messageId in memory — no DB insert yet
     const messageId = randomUUID();
 
-    // 10. Send routing event (messageId is known, but not persisted)
+    // 10. Resolve web search decision (user preference + ADE analysis)
+    const { shouldUseWebSearch, webSearchAutoDetected } = resolveWebSearch(
+      chatReq.webSearch,
+      adeResponse.analysis
+    );
+
+    // 11. Send routing event (messageId is known, but not persisted)
     await sendSSE(writer, encoder, {
       type: "routing",
       data: {
@@ -172,12 +178,14 @@ async function handleChat(
         isManualSelection,
         upgradeHint: adeResponse.upgradeHint ?? null,
         providerHint: adeResponse.providerHint ?? null,
+        webSearchUsed: shouldUseWebSearch,
+        webSearchAutoDetected,
       },
     });
 
-    // 11. Stream from provider
+    // 12. Stream from provider
     const systemPrompt = buildSystemPrompt();
-    const enableWebSearch = shouldEnableWebSearch(adeResponse.analysis);
+    const enableWebSearch = shouldUseWebSearch;
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 
     const apiCallLogs: ApiCallLogEntry[] = [];
@@ -284,9 +292,10 @@ interface StreamResult {
   success: boolean;
   content: string;
   thinkingContent: string;
-  citations: Array<{ url: string; title: string }>;
+  citations: Array<{ url: string; title: string; snippet?: string }>;
   usage: TokenUsage;
   latencyMs: number;
+  webSearchUsed: boolean;
   error?: string;
 }
 
@@ -311,13 +320,14 @@ async function streamFromProvider(
   const start = Date.now();
   let content = "";
   let thinkingContent = "";
-  const citations: Array<{ url: string; title: string }> = [];
+  const citations: Array<{ url: string; title: string; snippet?: string }> = [];
   let usage: TokenUsage = {
     inputTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
     cachedTokens: 0,
   };
+  let webSearchUsed = false;
 
   try {
     if (!SUPPORTED_PROVIDERS.has(model.provider)) {
@@ -361,7 +371,13 @@ async function streamFromProvider(
             citations.push(...event.citations);
             await sendSSE(writer, encoder, {
               type: "citations",
-              data: { citations: event.citations },
+              data: {
+                sources: event.citations.map((c) => ({
+                  url: c.url,
+                  title: c.title,
+                  snippet: c.snippet ?? "",
+                })),
+              },
             });
           }
           break;
@@ -374,6 +390,9 @@ async function streamFromProvider(
         case "done":
           if (event.usage) {
             usage = event.usage;
+          }
+          if (event.webSearchUsed) {
+            webSearchUsed = true;
           }
           break;
         case "error":
@@ -397,6 +416,7 @@ async function streamFromProvider(
       citations,
       usage,
       latencyMs,
+      webSearchUsed,
     };
   } catch (err) {
     const latencyMs = Date.now() - start;
@@ -417,6 +437,7 @@ async function streamFromProvider(
       citations,
       usage,
       latencyMs,
+      webSearchUsed,
       error: errorMessage,
     };
   }
@@ -447,6 +468,7 @@ async function finalize(
     },
     backupModels,
     analysis: adeResponse.analysis,
+    webSearchUsed: result.webSearchUsed,
   };
 
   const extendedData: Record<string, unknown> = {};
