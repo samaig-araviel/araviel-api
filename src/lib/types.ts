@@ -14,6 +14,7 @@ export interface ChatRequest {
   userTier?: string;
   modality?: string;
   selectedModelId?: string;
+  webSearch?: boolean;
 }
 
 export interface ModelInfo {
@@ -32,6 +33,7 @@ export interface ADEAnalysis {
   modality: string;
   keywords: string[];
   humanContextUsed: boolean;
+  webSearchRequired?: boolean;
 }
 
 export interface ADEReasoningFactor {
@@ -106,11 +108,13 @@ export interface TokenUsage {
   outputTokens: number;
   reasoningTokens: number;
   cachedTokens: number;
+  webSearchRequests?: number;
 }
 
 export interface Citation {
   url: string;
   title: string;
+  snippet?: string;
 }
 
 export type SSEEventType =
@@ -137,6 +141,8 @@ export interface SSERoutingData {
   isManualSelection: boolean;
   upgradeHint: ADEUpgradeHint | null;
   providerHint: ADEProviderHint | null;
+  webSearchUsed: boolean;
+  webSearchAutoDetected: boolean;
 }
 
 export interface SSEDoneData {

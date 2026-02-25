@@ -87,13 +87,33 @@ export class GeminiProvider implements AIProvider {
           groundingChunks?: Array<{
             web?: { uri?: string; title?: string };
           }>;
+          groundingSupports?: Array<{
+            segment?: { text?: string };
+            groundingChunkIndices?: number[];
+          }>;
         };
         if (metadata.groundingChunks) {
-          for (const gc of metadata.groundingChunks) {
+          // Build a map of chunk index to support snippet text
+          const chunkSnippets = new Map<number, string>();
+          if (metadata.groundingSupports) {
+            for (const support of metadata.groundingSupports) {
+              if (support.segment?.text && support.groundingChunkIndices) {
+                for (const idx of support.groundingChunkIndices) {
+                  if (!chunkSnippets.has(idx)) {
+                    chunkSnippets.set(idx, support.segment.text);
+                  }
+                }
+              }
+            }
+          }
+
+          for (let i = 0; i < metadata.groundingChunks.length; i++) {
+            const gc = metadata.groundingChunks[i];
             if (gc.web?.uri) {
               collectedCitations.push({
                 url: gc.web.uri,
                 title: gc.web.title ?? gc.web.uri,
+                snippet: chunkSnippets.get(i),
               });
             }
           }
@@ -110,10 +130,15 @@ export class GeminiProvider implements AIProvider {
       }
     }
 
+    const webSearchUsed = collectedCitations.length > 0;
+    if (webSearchUsed) {
+      usage.webSearchRequests = 1;
+    }
+
     if (collectedCitations.length > 0) {
       yield { type: "citations", citations: collectedCitations };
     }
 
-    yield { type: "done", usage };
+    yield { type: "done", usage, webSearchUsed };
   }
 }
