@@ -32,6 +32,10 @@ export function validateChatRequest(body: unknown): ChatRequest {
     modality: typeof req.modality === "string" ? req.modality : "text",
     selectedModelId: typeof req.selectedModelId === "string" ? req.selectedModelId : undefined,
     webSearch: typeof req.webSearch === "boolean" ? req.webSearch : undefined,
+    tone: typeof req.tone === "string" ? req.tone : undefined,
+    mood: typeof req.mood === "string" ? req.mood : undefined,
+    autoStrategy: typeof req.autoStrategy === "string" ? req.autoStrategy : undefined,
+    weather: typeof req.weather === "string" ? req.weather : undefined,
   };
 }
 
