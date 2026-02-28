@@ -103,6 +103,33 @@ async function handleChat(
     // 6. Detect available providers and call ADE
     const availableProviders = getAvailableProviders();
 
+    // Build humanContext and constraints based on frontend fields
+    let humanContext: { emotionalState?: { mood?: string }; environmentalContext?: { weather?: string }; preferences?: { tone?: string } } | undefined;
+    let constraints: { maxCostPer1kTokens?: number } | undefined;
+
+    const shouldSendHumanContext =
+      chatReq.autoStrategy === "humanFactors" ||
+      chatReq.tone ||
+      chatReq.mood ||
+      chatReq.weather;
+
+    if (shouldSendHumanContext && chatReq.autoStrategy !== "taskBased") {
+      humanContext = {};
+      if (chatReq.mood) {
+        humanContext.emotionalState = { mood: chatReq.mood };
+      }
+      if (chatReq.weather) {
+        humanContext.environmentalContext = { weather: chatReq.weather };
+      }
+      if (chatReq.tone) {
+        humanContext.preferences = { tone: chatReq.tone };
+      }
+    }
+
+    if (chatReq.autoStrategy === "costEfficient") {
+      constraints = { maxCostPer1kTokens: 0.005 };
+    }
+
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
       prompt: chatReq.message,
       modality: chatReq.modality ?? "text",
@@ -112,6 +139,9 @@ async function handleChat(
         conversationId,
         previousModelUsed,
       },
+      humanContext,
+      constraints,
+      tone: chatReq.tone,
     });
 
     // 7. Check for fallback (unsupported task)

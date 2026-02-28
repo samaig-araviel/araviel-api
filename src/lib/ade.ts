@@ -5,12 +5,25 @@ interface ADERequestContext {
   previousModelUsed?: string;
 }
 
+interface ADEHumanContext {
+  emotionalState?: { mood?: string };
+  environmentalContext?: { weather?: string };
+  preferences?: { tone?: string };
+}
+
+interface ADEConstraints {
+  maxCostPer1kTokens?: number;
+}
+
 interface ADERequest {
   prompt: string;
   modality: string;
   userTier: string;
   availableProviders?: string[];
   context?: ADERequestContext;
+  humanContext?: ADEHumanContext;
+  constraints?: ADEConstraints;
+  tone?: string;
 }
 
 interface ADECallResult {
@@ -37,6 +50,18 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
       conversationId: request.context.conversationId,
       previousModelUsed: request.context.previousModelUsed,
     };
+  }
+
+  if (request.humanContext) {
+    body.humanContext = request.humanContext;
+  }
+
+  if (request.constraints) {
+    body.constraints = request.constraints;
+  }
+
+  if (request.tone) {
+    body.tone = request.tone;
   }
 
   const start = Date.now();

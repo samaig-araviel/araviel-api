@@ -15,6 +15,10 @@ export interface ChatRequest {
   modality?: string;
   selectedModelId?: string;
   webSearch?: boolean;
+  tone?: string;
+  mood?: string;
+  autoStrategy?: string;
+  weather?: string;
 }
 
 export interface ModelInfo {
