@@ -847,6 +847,16 @@ Check each against the existing codebase. Only implement what's missing.
 - [ ] Display citations as clickable source links below the response
 - [ ] Only show citations section when citations exist
 
+### Inline Chart Rendering
+- [ ] Detect ` ```chart ` fenced code blocks in assistant message content
+- [ ] Parse the JSON inside each chart block
+- [ ] Render interactive charts inline using Recharts (or compatible library)
+- [ ] Support all chart types: line, area, bar, candlestick, pie, donut, composed, scatter
+- [ ] Apply `config` options: yAxisFormat, xAxisFormat, height, showGrid, showLegend, gradientFill, referenceLines
+- [ ] Handle multiple chart blocks in a single message
+- [ ] Gracefully handle malformed chart JSON (show raw JSON as fallback)
+- [ ] Charts should render progressively as the streaming response completes each chart block
+
 ### Usage Statistics
 - [ ] Display token usage from `done` event (input, output, reasoning, cached)
 - [ ] Display cost (`costUsd`) formatted as dollars
@@ -1041,7 +1051,118 @@ interface HealthResponse {
 
 ---
 
-## 14. Important Backend Behaviors to Know
+## 14. Inline Chart Rendering
+
+The backend system prompt instructs AI models to emit ` ```chart ` fenced code blocks containing valid JSON when data visualization is appropriate. The frontend must detect these blocks in the streamed markdown content and render them as interactive charts inline within the message.
+
+### How It Works
+
+1. The AI response content (accumulated from `delta` events) is standard markdown.
+2. Within the markdown, ` ```chart ` blocks contain JSON describing a chart.
+3. The frontend's markdown renderer must intercept these blocks and render a chart component instead of a code block.
+
+### Chart JSON Shape
+
+```typescript
+interface ChartData {
+  type: "line" | "area" | "bar" | "candlestick" | "pie" | "donut" | "composed" | "scatter";
+  title: string;
+  subtitle?: string;
+  xKey: string;
+  series: Array<{
+    key: string;
+    name: string;
+    color?: string;
+    chartType?: "line" | "bar" | "area"; // Only for composed charts
+  }>;
+  config?: {
+    yAxisFormat?: "currency" | "usd" | "inr" | "percent" | "percentage" | "compact" | "integer";
+    xAxisFormat?: "date";
+    height?: number;
+    showGrid?: boolean;
+    showLegend?: boolean;
+    gradientFill?: boolean;
+    referenceLines?: Array<{
+      y: number;
+      label: string;
+      color?: string;
+      dashed?: boolean;
+    }>;
+  };
+  data: Array<Record<string, string | number>>;
+}
+```
+
+### Recommended Implementation
+
+Use **Recharts** (`recharts`) for rendering. It integrates well with React and supports all the required chart types.
+
+```
+npm install recharts
+```
+
+**Markdown parsing approach:**
+
+When processing the streamed markdown for rendering, detect fenced code blocks with the language tag `chart`. Instead of rendering as a `<pre><code>` block, parse the JSON and pass it to a `<ChartRenderer>` component.
+
+If using `react-markdown`, use the `components` prop to override the `code` element:
+
+```tsx
+<ReactMarkdown
+  components={{
+    code({ className, children }) {
+      if (className === "language-chart") {
+        try {
+          const chartData = JSON.parse(String(children));
+          return <ChartRenderer data={chartData} />;
+        } catch {
+          return <pre><code>{String(children)}</code></pre>;
+        }
+      }
+      return <code className={className}>{children}</code>;
+    }
+  }}
+>
+  {messageContent}
+</ReactMarkdown>
+```
+
+### Chart Types to Support
+
+| Type | Recharts Component | Notes |
+|---|---|---|
+| `line` | `<LineChart>` | Standard time series |
+| `area` | `<AreaChart>` | With optional gradient fill |
+| `bar` | `<BarChart>` | Categorical comparisons |
+| `candlestick` | Custom (use `<ComposedChart>` with error bars or a dedicated library) | OHLC data |
+| `pie` | `<PieChart>` | Allocation/breakdown |
+| `donut` | `<PieChart>` with `innerRadius` | Cleaner look for fewer segments |
+| `composed` | `<ComposedChart>` | Mixed chart types (each series has `chartType`) |
+| `scatter` | `<ScatterChart>` | Correlation analysis |
+
+### Value Formatting
+
+Apply `yAxisFormat` to Y-axis tick labels and tooltips:
+
+| Format | Output |
+|---|---|
+| `currency` / `usd` | `$1,234.56` |
+| `inr` | `₹1,234.56` |
+| `percent` / `percentage` | `12.34%` |
+| `compact` | `1.2M`, `3.4K` |
+| `integer` | `1,234` |
+
+### Edge Cases
+
+- **Malformed JSON**: Show the raw text as a standard code block — never crash.
+- **Streaming**: Chart blocks may arrive partially during streaming. Only attempt to parse and render once the closing ` ``` ` is received for that block.
+- **Multiple charts**: A single message may contain multiple chart blocks interspersed with text. Render each chart inline at its position in the markdown.
+- **Empty data**: If `data` is an empty array, show a "No data available" placeholder inside the chart area.
+- **Unknown chart type**: Fall back to a `<BarChart>` and log a warning.
+
+---
+
+## 15. Important Backend Behaviors to Know
 
 1. **Conversation history limit**: The backend sends the last 20 messages (either main thread or sub-conversation thread) to the AI provider. The frontend doesn't need to handle this, but be aware that very long conversations have truncated context.
 

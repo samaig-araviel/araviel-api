@@ -12,6 +12,7 @@ import type {
   TokenUsage,
 } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
+import { getChartInstructions } from "@/lib/prompts/chart-instructions";
 
 export function validateChatRequest(body: unknown): ChatRequest {
   if (!body || typeof body !== "object") {
@@ -357,12 +358,14 @@ function guessProviderFromModelId(modelId: string): string {
 }
 
 export function buildSystemPrompt(): string {
-  return [
+  const basePrompt = [
     "You are a helpful AI assistant powered by Araviel, an intelligent AI platform.",
     "Provide clear, accurate, and well-structured responses.",
     "When appropriate, use markdown formatting for better readability.",
     "Be concise but thorough. If you are unsure about something, say so.",
   ].join(" ");
+
+  return `${basePrompt}\n\n${getChartInstructions()}`;
 }
 
 export function resolveWebSearch(
