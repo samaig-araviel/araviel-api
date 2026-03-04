@@ -1,7 +1,7 @@
 import type { ConversationMessage, Citation, TokenUsage } from "@/lib/types";
 
 export interface ProviderStreamEvent {
-  type: "delta" | "thinking" | "citations" | "tool_use" | "done" | "error";
+  type: "delta" | "thinking" | "citations" | "tool_use" | "image_generation" | "done" | "error";
   content?: string;
   citations?: Citation[];
   tool?: string;
@@ -9,6 +9,7 @@ export interface ProviderStreamEvent {
   usage?: TokenUsage;
   webSearchUsed?: boolean;
   error?: string;
+  imageUrl?: string;
 }
 
 export interface ProviderConfig {
@@ -17,6 +18,7 @@ export interface ProviderConfig {
   messages: ConversationMessage[];
   enableThinking: boolean;
   enableWebSearch: boolean;
+  enableImageGeneration?: boolean;
 }
 
 export interface AIProvider {

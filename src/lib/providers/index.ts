@@ -12,6 +12,7 @@ const PROVIDER_ENV_KEYS: Record<SupportedProvider, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   google: "GOOGLE_API_KEY",
   perplexity: "PERPLEXITY_API_KEY",
+  stability: "STABILITY_API_KEY",
 };
 
 /**
@@ -44,6 +45,10 @@ export function getProvider(providerName: SupportedProvider): AIProvider {
     case "perplexity":
       provider = new PerplexityProvider();
       break;
+    case "stability":
+      // Stability only supports dedicated image generation (via generateImage()),
+      // not text streaming. This case should not be reached for streaming calls.
+      throw new Error("Stability AI does not support text streaming. Use dedicated image generation instead.");
     default:
       throw new Error(`Unsupported provider: ${providerName}`);
   }
