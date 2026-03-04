@@ -22,7 +22,9 @@ import {
   shouldEnableThinking,
   findSupportedBackup,
   validateSubConversation,
+  isImageGenerationModel,
 } from "@/lib/chat-helpers";
+import { generateImage } from "@/lib/providers/image";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
@@ -213,25 +215,188 @@ async function handleChat(
       },
     });
 
-    // 12. Stream from provider
+    // 12. Determine if image generation is needed
+    const enableImageGeneration =
+      adeResponse.analysis.intent === "image_generation" || chatReq.modality === "image";
+
     const systemPrompt = buildSystemPrompt();
     const enableWebSearch = shouldUseWebSearch;
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 
     const apiCallLogs: ApiCallLogEntry[] = [];
 
+    // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
+    if (enableImageGeneration && isImageGenerationModel(model.id)) {
+      const start = Date.now();
+      try {
+        const imageResult = await generateImage(model.provider, model.id, chatReq.message);
+        const latencyMs = Date.now() - start;
+
+        apiCallLogs.push({
+          provider: model.provider,
+          modelId: model.id,
+          statusCode: 200,
+          latencyMs,
+        });
+
+        await sendSSE(writer, encoder, {
+          type: "image_generation",
+          data: {
+            url: imageResult.url,
+            prompt: chatReq.message,
+            model: model.name,
+            provider: model.provider,
+            size: imageResult.size ?? "1024x1024",
+            style: imageResult.style ?? null,
+          },
+        });
+
+        const markdownContent = `![Generated image](${imageResult.url})`;
+        await sendSSE(writer, encoder, {
+          type: "delta",
+          data: { content: markdownContent },
+        });
+
+        const imageStreamResult: StreamResult = {
+          success: true,
+          content: markdownContent,
+          thinkingContent: "",
+          citations: [],
+          usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+          latencyMs,
+          webSearchUsed: false,
+        };
+
+        await finalize(
+          messageId,
+          conversationId,
+          imageStreamResult,
+          model,
+          backupModels,
+          adeResponse,
+          adeLatencyMs,
+          apiCallLogs,
+          writer,
+          encoder,
+          subConversationId
+        );
+        return;
+      } catch (err) {
+        const latencyMs = Date.now() - start;
+        const errorMessage = err instanceof Error ? err.message : "Image generation failed";
+
+        apiCallLogs.push({
+          provider: model.provider,
+          modelId: model.id,
+          statusCode: 500,
+          latencyMs,
+          errorMessage,
+        });
+
+        // Try backup dedicated image model
+        const backup = findSupportedBackup(backupModels);
+        if (backup && isImageGenerationModel(backup.id)) {
+          await sendSSE(writer, encoder, {
+            type: "error",
+            data: {
+              message: `Retrying with backup model ${backup.name}...`,
+              code: "PROVIDER_RETRY",
+            },
+          });
+
+          const backupStart = Date.now();
+          try {
+            const backupImageResult = await generateImage(backup.provider, backup.id, chatReq.message);
+            const backupLatencyMs = Date.now() - backupStart;
+
+            apiCallLogs.push({
+              provider: backup.provider,
+              modelId: backup.id,
+              statusCode: 200,
+              latencyMs: backupLatencyMs,
+            });
+
+            await sendSSE(writer, encoder, {
+              type: "image_generation",
+              data: {
+                url: backupImageResult.url,
+                prompt: chatReq.message,
+                model: backup.name,
+                provider: backup.provider,
+                size: backupImageResult.size ?? "1024x1024",
+                style: backupImageResult.style ?? null,
+              },
+            });
+
+            const markdownContent = `![Generated image](${backupImageResult.url})`;
+            await sendSSE(writer, encoder, {
+              type: "delta",
+              data: { content: markdownContent },
+            });
+
+            const backupStreamResult: StreamResult = {
+              success: true,
+              content: markdownContent,
+              thinkingContent: "",
+              citations: [],
+              usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+              latencyMs: backupLatencyMs,
+              webSearchUsed: false,
+            };
+
+            await finalize(
+              messageId,
+              conversationId,
+              backupStreamResult,
+              backup,
+              backupModels,
+              adeResponse,
+              adeLatencyMs,
+              apiCallLogs,
+              writer,
+              encoder,
+              subConversationId
+            );
+            return;
+          } catch (backupErr) {
+            const backupLatencyMs = Date.now() - backupStart;
+            apiCallLogs.push({
+              provider: backup.provider,
+              modelId: backup.id,
+              statusCode: 500,
+              latencyMs: backupLatencyMs,
+              errorMessage: backupErr instanceof Error ? backupErr.message : "Backup image gen failed",
+            });
+          }
+        }
+
+        await sendSSE(writer, encoder, {
+          type: "error",
+          data: {
+            message: `Image generation failed: ${errorMessage}`,
+            code: "PROVIDER_ERROR",
+          },
+        });
+        await writer.close();
+        return;
+      }
+    }
+
+    // Path B: Chat models (with optional native image gen)
     const streamResult = await streamFromProvider(
       model,
       systemPrompt,
       history,
       enableWebSearch,
       enableThinking,
+      enableImageGeneration,
+      chatReq.message,
       writer,
       encoder,
       apiCallLogs
     );
 
-    // 12. If primary failed, try backup
+    // 13. If primary failed, try backup
     if (!streamResult.success) {
       const backup = findSupportedBackup(backupModels);
 
@@ -250,6 +415,8 @@ async function handleChat(
           history,
           enableWebSearch,
           enableThinking,
+          enableImageGeneration,
+          chatReq.message,
           writer,
           encoder,
           apiCallLogs
@@ -343,6 +510,8 @@ async function streamFromProvider(
   history: Array<{ role: string; content: string }>,
   enableWebSearch: boolean,
   enableThinking: boolean,
+  enableImageGeneration: boolean,
+  userPrompt: string,
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder,
   apiCallLogs: ApiCallLogEntry[]
@@ -374,6 +543,7 @@ async function streamFromProvider(
       })),
       enableThinking,
       enableWebSearch,
+      enableImageGeneration,
     });
 
     for await (const event of providerStream) {
@@ -409,6 +579,20 @@ async function streamFromProvider(
                 })),
               },
             });
+          }
+          break;
+        case "image_generation":
+          if (event.imageUrl) {
+            await sendSSE(writer, encoder, {
+              type: "image_generation",
+              data: {
+                url: event.imageUrl,
+                prompt: userPrompt,
+                model: model.name,
+                provider: model.provider,
+              },
+            });
+            content += `\n![Generated image](${event.imageUrl})\n`;
           }
           break;
         case "tool_use":

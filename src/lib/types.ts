@@ -1,10 +1,11 @@
-export type SupportedProvider = "openai" | "anthropic" | "google" | "perplexity";
+export type SupportedProvider = "openai" | "anthropic" | "google" | "perplexity" | "stability";
 
 export const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set<SupportedProvider>([
   "openai",
   "anthropic",
   "google",
   "perplexity",
+  "stability",
 ]);
 
 export interface ChatRequest {
@@ -127,6 +128,7 @@ export type SSEEventType =
   | "delta"
   | "citations"
   | "tool_use"
+  | "image_generation"
   | "done"
   | "error";
 

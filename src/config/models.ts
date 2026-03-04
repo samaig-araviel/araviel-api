@@ -43,6 +43,12 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   // Perplexity
   "sonar": { inputPerMillion: 1, outputPerMillion: 1 },
   "sonar-pro": { inputPerMillion: 3, outputPerMillion: 15 },
+
+  // Image generation models
+  "dall-e-3": { inputPerMillion: 40, outputPerMillion: 80 },
+  "imagen-4": { inputPerMillion: 40, outputPerMillion: 60 },
+  "imagen-3": { inputPerMillion: 40, outputPerMillion: 60 },
+  "stable-diffusion-3.5": { inputPerMillion: 30, outputPerMillion: 50 },
 };
 
 const PROVIDER_DEFAULTS: Record<string, ModelPricing> = {
@@ -50,6 +56,7 @@ const PROVIDER_DEFAULTS: Record<string, ModelPricing> = {
   anthropic: { inputPerMillion: 3, outputPerMillion: 15 },
   google: { inputPerMillion: 1.25, outputPerMillion: 10 },
   perplexity: { inputPerMillion: 1, outputPerMillion: 1 },
+  stability: { inputPerMillion: 30, outputPerMillion: 50 },
 };
 
 export function getModelPricing(modelId: string, provider: string): ModelPricing {

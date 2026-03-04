@@ -53,6 +53,9 @@ export class GeminiProvider implements AIProvider {
         ...(thinkingBudget !== undefined && !isFlashModel
           ? { thinkingConfig: { thinkingBudget } }
           : {}),
+        ...(config.enableImageGeneration
+          ? { responseModalities: ["TEXT", "IMAGE"] }
+          : {}),
       },
     });
 
@@ -77,6 +80,12 @@ export class GeminiProvider implements AIProvider {
           const thoughtPart = part as Part & { thought?: boolean };
           if (thoughtPart.thought && thoughtPart.text) {
             yield { type: "thinking", content: thoughtPart.text };
+          }
+          // Handle native image generation (inline image data)
+          const inlinePart = part as Part & { inlineData?: { mimeType?: string; data?: string } };
+          if (inlinePart.inlineData?.data) {
+            const mime = inlinePart.inlineData.mimeType ?? "image/png";
+            yield { type: "image_generation", imageUrl: `data:${mime};base64,${inlinePart.inlineData.data}` };
           }
         }
       }

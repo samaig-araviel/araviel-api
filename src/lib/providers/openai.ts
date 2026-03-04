@@ -30,6 +30,9 @@ export class OpenAIProvider implements AIProvider {
     if (config.enableWebSearch) {
       tools.push({ type: "web_search_preview" });
     }
+    if (config.enableImageGeneration) {
+      tools.push({ type: "image_generation" } as OpenAI.Responses.Tool);
+    }
 
     const params: OpenAI.Responses.ResponseCreateParamsStreaming = {
       model: config.modelId,
@@ -68,6 +71,13 @@ export class OpenAIProvider implements AIProvider {
         for (const item of response.output ?? []) {
           if (item.type === "web_search_call") {
             webSearchToolUsed = true;
+          }
+          // Handle native image generation results
+          if (item.type === "image_generation_call") {
+            const imageItem = item as typeof item & { result?: string };
+            if (imageItem.result) {
+              yield { type: "image_generation", imageUrl: `data:image/png;base64,${imageItem.result}` };
+            }
           }
           if (item.type === "message" && item.content) {
             for (const part of item.content) {

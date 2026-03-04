@@ -351,10 +351,18 @@ export function resolveModel(
 
 function guessProviderFromModelId(modelId: string): string {
   if (modelId.startsWith("claude")) return "anthropic";
-  if (modelId.startsWith("gpt") || modelId.startsWith("o3") || modelId.startsWith("o4")) return "openai";
-  if (modelId.startsWith("gemini")) return "google";
+  if (modelId.startsWith("gpt") || modelId.startsWith("o3") || modelId.startsWith("o4") || modelId.startsWith("dall-e")) return "openai";
+  if (modelId.startsWith("gemini") || modelId.startsWith("imagen")) return "google";
   if (modelId.startsWith("sonar")) return "perplexity";
+  if (modelId.startsWith("stable-diffusion")) return "stability";
   return "openai";
+}
+
+/** Dedicated image generation models that use separate image APIs (not chat/streaming). */
+const DEDICATED_IMAGE_MODELS = new Set(["dall-e-3", "imagen-4", "imagen-3", "stable-diffusion-3.5"]);
+
+export function isImageGenerationModel(modelId: string): boolean {
+  return DEDICATED_IMAGE_MODELS.has(modelId);
 }
 
 export function buildSystemPrompt(): string {
