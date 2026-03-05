@@ -146,6 +146,7 @@ async function handleChat(
       humanContext,
       constraints,
       tone: chatReq.tone,
+      conversationHasImages: chatReq.conversationHasImages,
     });
 
     // 7. Check for fallback (unsupported task)

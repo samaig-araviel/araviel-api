@@ -37,6 +37,7 @@ export function validateChatRequest(body: unknown): ChatRequest {
     mood: typeof req.mood === "string" ? req.mood : undefined,
     autoStrategy: typeof req.autoStrategy === "string" ? req.autoStrategy : undefined,
     weather: typeof req.weather === "string" ? req.weather : undefined,
+    conversationHasImages: typeof req.conversationHasImages === "boolean" ? req.conversationHasImages : undefined,
   };
 }
 
