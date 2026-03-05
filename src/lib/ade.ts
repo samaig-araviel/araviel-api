@@ -24,6 +24,7 @@ interface ADERequest {
   humanContext?: ADEHumanContext;
   constraints?: ADEConstraints;
   tone?: string;
+  conversationHasImages?: boolean;
 }
 
 interface ADECallResult {
@@ -62,6 +63,10 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
 
   if (request.tone) {
     body.tone = request.tone;
+  }
+
+  if (request.conversationHasImages) {
+    body.conversationHasImages = true;
   }
 
   const start = Date.now();

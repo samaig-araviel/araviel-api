@@ -20,6 +20,7 @@ export interface ChatRequest {
   mood?: string;
   autoStrategy?: string;
   weather?: string;
+  conversationHasImages?: boolean;
 }
 
 export interface ModelInfo {
