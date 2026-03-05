@@ -365,6 +365,43 @@ export function isImageGenerationModel(modelId: string): boolean {
   return DEDICATED_IMAGE_MODELS.has(modelId);
 }
 
+/**
+ * Providers whose chat models support native image generation
+ * (OpenAI via image_generation tool in Responses API, Google via responseModalities).
+ */
+const NATIVE_IMAGE_GEN_PROVIDERS = new Set(["openai", "google"]);
+
+/**
+ * Check whether a model can generate images — either as a dedicated image model
+ * or as a chat model with native image generation support.
+ */
+export function canModelGenerateImages(modelId: string, provider: string): boolean {
+  return DEDICATED_IMAGE_MODELS.has(modelId) || NATIVE_IMAGE_GEN_PROVIDERS.has(provider);
+}
+
+/**
+ * Returns a list of image-capable models we support, grouped by type,
+ * for use in user-facing fallback messages.
+ */
+export function getImageCapableModels(): {
+  dedicated: Array<{ id: string; name: string; provider: string }>;
+  nativeChat: Array<{ id: string; name: string; provider: string }>;
+} {
+  return {
+    dedicated: [
+      { id: "dall-e-3", name: "DALL-E 3", provider: "OpenAI" },
+      { id: "imagen-4", name: "Imagen 4", provider: "Google" },
+      { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "Stability AI" },
+    ],
+    nativeChat: [
+      { id: "gpt-5", name: "GPT-5", provider: "OpenAI" },
+      { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google" },
+    ],
+  };
+}
+
 export function buildSystemPrompt(): string {
   const basePrompt = [
     "You are a helpful AI assistant powered by Araviel, an intelligent AI platform.",
