@@ -23,6 +23,8 @@ import {
   findSupportedBackup,
   validateSubConversation,
   isImageGenerationModel,
+  canModelGenerateImages,
+  getImageCapableModels,
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
 import { corsHeaders, handleCorsOptions } from "../cors";
@@ -380,6 +382,190 @@ async function handleChat(
         await writer.close();
         return;
       }
+    }
+
+    // Guard: If image generation is needed but the model can't do it,
+    // try to auto-fallback to an image-capable backup, or return a helpful response.
+    if (enableImageGeneration && !canModelGenerateImages(model.id, model.provider)) {
+      // Try to find an image-capable backup model
+      const imageBackup = backupModels.find(
+        (b) => SUPPORTED_PROVIDERS.has(b.provider) && canModelGenerateImages(b.id, b.provider)
+      );
+
+      if (imageBackup) {
+        // Auto-fallback to image-capable backup
+        await sendSSE(writer, encoder, {
+          type: "error",
+          data: {
+            message: `${model.name} cannot generate images. Switching to ${imageBackup.name}...`,
+            code: "PROVIDER_RETRY",
+          },
+        });
+
+        if (isImageGenerationModel(imageBackup.id)) {
+          // Backup is a dedicated image model — use image generation API
+          const start = Date.now();
+          try {
+            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, chatReq.message);
+            const latencyMs = Date.now() - start;
+
+            apiCallLogs.push({
+              provider: imageBackup.provider,
+              modelId: imageBackup.id,
+              statusCode: 200,
+              latencyMs,
+            });
+
+            await sendSSE(writer, encoder, {
+              type: "image_generation",
+              data: {
+                url: imageResult.url,
+                prompt: chatReq.message,
+                model: imageBackup.name,
+                provider: imageBackup.provider,
+                size: imageResult.size ?? "1024x1024",
+                style: imageResult.style ?? null,
+              },
+            });
+
+            const markdownContent = `![Generated image](${imageResult.url})`;
+            await sendSSE(writer, encoder, {
+              type: "delta",
+              data: { content: markdownContent },
+            });
+
+            const imageStreamResult: StreamResult = {
+              success: true,
+              content: markdownContent,
+              thinkingContent: "",
+              citations: [],
+              usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+              latencyMs,
+              webSearchUsed: false,
+            };
+
+            await finalize(
+              messageId,
+              conversationId,
+              imageStreamResult,
+              imageBackup,
+              backupModels,
+              adeResponse,
+              adeLatencyMs,
+              apiCallLogs,
+              writer,
+              encoder,
+              subConversationId
+            );
+            return;
+          } catch (err) {
+            const latencyMs = Date.now() - start;
+            apiCallLogs.push({
+              provider: imageBackup.provider,
+              modelId: imageBackup.id,
+              statusCode: 500,
+              latencyMs,
+              errorMessage: err instanceof Error ? err.message : "Image generation failed",
+            });
+            // Fall through to the helpful message below
+          }
+        } else {
+          // Backup is a chat model with native image gen — use streaming path
+          const backupResult = await streamFromProvider(
+            imageBackup,
+            systemPrompt,
+            history,
+            enableWebSearch,
+            enableThinking,
+            true, // enableImageGeneration
+            chatReq.message,
+            writer,
+            encoder,
+            apiCallLogs
+          );
+
+          if (backupResult.success) {
+            await finalize(
+              messageId,
+              conversationId,
+              backupResult,
+              imageBackup,
+              backupModels,
+              adeResponse,
+              adeLatencyMs,
+              apiCallLogs,
+              writer,
+              encoder,
+              subConversationId
+            );
+            return;
+          }
+          // Fall through to the helpful message below
+        }
+      }
+
+      // No image-capable backup found, or backup also failed — send helpful response
+      const imageModels = getImageCapableModels();
+      const suggestedPlatforms = adeResponse.fallback?.suggestedPlatforms ?? [];
+
+      let helpContent = `### Unable to Generate Images\n\n`;
+      helpContent += `**${model.name}** is a text-only model and cannot create images. `;
+      helpContent += `To generate images, please select one of the image-capable models below.\n\n`;
+
+      helpContent += `---\n\n`;
+      helpContent += `#### Dedicated Image Models\n`;
+      helpContent += `These models are purpose-built for image generation:\n\n`;
+      for (const m of imageModels.dedicated) {
+        helpContent += `- **${m.name}** *(${m.provider})* — \`${m.id}\`\n`;
+      }
+
+      helpContent += `\n#### Chat Models with Image Generation\n`;
+      helpContent += `These models can generate images alongside text responses:\n\n`;
+      for (const m of imageModels.nativeChat) {
+        helpContent += `- **${m.name}** *(${m.provider})* — \`${m.id}\`\n`;
+      }
+
+      if (suggestedPlatforms.length > 0) {
+        helpContent += `\n---\n\n`;
+        helpContent += `#### External Platforms\n`;
+        helpContent += `You can also try these dedicated image generation platforms:\n\n`;
+        for (const platform of suggestedPlatforms) {
+          helpContent += `- ${platform}\n`;
+        }
+      }
+
+      helpContent += `\n---\n\n`;
+      helpContent += `*Select an image-capable model from the model picker and try again.*`;
+
+      await sendSSE(writer, encoder, {
+        type: "delta",
+        data: { content: helpContent },
+      });
+
+      const helpStreamResult: StreamResult = {
+        success: true,
+        content: helpContent,
+        thinkingContent: "",
+        citations: [],
+        usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+        latencyMs: 0,
+        webSearchUsed: false,
+      };
+
+      await finalize(
+        messageId,
+        conversationId,
+        helpStreamResult,
+        model,
+        backupModels,
+        adeResponse,
+        adeLatencyMs,
+        apiCallLogs,
+        writer,
+        encoder,
+        subConversationId
+      );
+      return;
     }
 
     // Path B: Chat models (with optional native image gen)
