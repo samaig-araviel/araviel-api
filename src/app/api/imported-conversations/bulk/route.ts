@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../../cors";
-import { bulkUpdate, bulkSoftDelete } from "@/lib/imported-conversations";
+import { getUserId, bulkUpdate, bulkSoftDelete } from "@/lib/imported-conversations";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -13,13 +13,7 @@ export async function PATCH(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const body = await request.json().catch(() => null);
 
@@ -66,13 +60,7 @@ export async function DELETE(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const body = await request.json().catch(() => null);
 

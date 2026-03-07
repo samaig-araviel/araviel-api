@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
-import { getMessages } from "@/lib/imported-conversations";
+import { getUserId, getMessages } from "@/lib/imported-conversations";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -16,13 +16,7 @@ export async function GET(
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const { id } = await params;
     const messages = await getMessages(userId, id);

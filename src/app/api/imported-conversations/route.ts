@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../cors";
 import {
   bulkImport,
+  getUserId,
   listConversations,
   validateConversationInput,
   type ImportConversationInput,
@@ -18,13 +19,7 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const body = await request.json().catch(() => null);
     if (!body || !Array.isArray(body.conversations) || body.conversations.length === 0) {
@@ -79,13 +74,7 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider") || undefined;
