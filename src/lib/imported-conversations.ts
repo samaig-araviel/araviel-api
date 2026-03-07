@@ -1,5 +1,25 @@
+import { NextRequest } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { encrypt, decrypt } from "@/lib/encryption";
+
+// ---------------------------------------------------------------------------
+// Auth helper
+// ---------------------------------------------------------------------------
+
+// Default user ID used until real authentication is implemented.
+// All existing routes in the codebase operate without auth; this matches
+// that pattern while keeping user_id scoping in place for a smooth
+// migration to real auth later.
+const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Extract user ID from request. Uses x-user-id header if present,
+ * otherwise falls back to a default placeholder.
+ * Replace this with real auth (JWT / Supabase Auth) when ready.
+ */
+export function getUserId(request: NextRequest): string {
+  return request.headers.get("x-user-id") || DEFAULT_USER_ID;
+}
 
 // ---------------------------------------------------------------------------
 // Types

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../../cors";
-import { updateConversation, softDelete } from "@/lib/imported-conversations";
+import { getUserId, updateConversation, softDelete } from "@/lib/imported-conversations";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -16,13 +16,7 @@ export async function PATCH(
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const { id } = await params;
     const body = await request.json().catch(() => null);
@@ -67,13 +61,7 @@ export async function DELETE(
   const origin = request.headers.get("origin");
 
   try {
-    const userId = request.headers.get("x-user-id");
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401, headers: corsHeaders(origin) }
-      );
-    }
+    const userId = getUserId(request);
 
     const { id } = await params;
     await softDelete(userId, id);
