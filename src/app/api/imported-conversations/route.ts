@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
       headers: corsHeaders(origin),
     });
   } catch (err) {
+    console.error("[POST /api/imported-conversations]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(origin) }
@@ -100,6 +101,7 @@ export async function GET(request: NextRequest) {
       { headers: corsHeaders(origin) }
     );
   } catch (err) {
+    console.error("[GET /api/imported-conversations]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(origin) }
