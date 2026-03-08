@@ -29,19 +29,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate each conversation input
+    // Validate each conversation input — skip invalid ones instead of
+    // rejecting the whole batch so partial imports still succeed.
+    const conversations: ImportConversationInput[] = [];
     for (let i = 0; i < body.conversations.length; i++) {
       const err = validateConversationInput(body.conversations[i], i);
       if (err) {
-        return NextResponse.json(
-          { error: err },
-          { status: 400, headers: corsHeaders(origin) }
-        );
+        continue; // skip this conversation
       }
-    }
-
-    const conversations: ImportConversationInput[] = body.conversations.map(
-      (c: Record<string, unknown>) => ({
+      const c = body.conversations[i] as Record<string, unknown>;
+      conversations.push({
         externalId: c.externalId as string | undefined,
         title: c.title as string,
         provider: c.provider as string,
@@ -50,8 +47,15 @@ export async function POST(request: NextRequest) {
         messageCount: c.messageCount as number,
         createdAt: c.createdAt as string | undefined,
         updatedAt: c.updatedAt as string | undefined,
-      })
-    );
+      });
+    }
+
+    if (conversations.length === 0) {
+      return NextResponse.json(
+        { error: "No valid conversations found in the request" },
+        { status: 400, headers: corsHeaders(origin) }
+      );
+    }
 
     const result = await bulkImport(userId, conversations);
 
