@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../cors";
 import {
   bulkImport,
-  getUserId,
   listConversations,
   validateConversationInput,
   type ImportConversationInput,
 } from "@/lib/imported-conversations";
-import { isClaudeExportFormat, transformClaudeExport } from "@/lib/claude-export-transform";
+import {
+  isClaudeExportFormat,
+  transformClaudeExport,
+} from "@/lib/claude-export-transform";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -20,24 +22,26 @@ export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const raw = await request.json().catch(() => null);
     const body = isClaudeExportFormat(raw) ? transformClaudeExport(raw) : raw;
-    if (!body || !Array.isArray(body.conversations) || body.conversations.length === 0) {
+
+    if (
+      !body ||
+      !Array.isArray(body.conversations) ||
+      body.conversations.length === 0
+    ) {
       return NextResponse.json(
         { error: "conversations must be a non-empty array" },
         { status: 400, headers: corsHeaders(origin) }
       );
     }
 
-    // Validate each conversation input — skip invalid ones instead of
-    // rejecting the whole batch so partial imports still succeed.
+    // Validate each conversation — skip invalid ones so partial imports succeed
     const conversations: ImportConversationInput[] = [];
     for (let i = 0; i < body.conversations.length; i++) {
       const err = validateConversationInput(body.conversations[i], i);
       if (err) {
-        continue; // skip this conversation
+        continue;
       }
       const c = body.conversations[i] as Record<string, unknown>;
       conversations.push({
@@ -59,7 +63,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await bulkImport(userId, conversations);
+    const result = await bulkImport(conversations);
 
     return NextResponse.json(result, {
       status: 201,
@@ -81,8 +85,6 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider") || undefined;
     const archivedParam = searchParams.get("archived");
@@ -90,9 +92,13 @@ export async function GET(request: NextRequest) {
 
     const archived = archivedParam === "true";
     const starred =
-      starredParam === "true" ? true : starredParam === "false" ? false : undefined;
+      starredParam === "true"
+        ? true
+        : starredParam === "false"
+          ? false
+          : undefined;
 
-    const conversations = await listConversations(userId, {
+    const conversations = await listConversations({
       provider,
       archived,
       starred,

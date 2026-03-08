@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../../cors";
-import { getUserId, updateConversation, softDelete } from "@/lib/imported-conversations";
+import { updateConversation, softDelete } from "@/lib/imported-conversations";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -16,8 +16,6 @@ export async function PATCH(
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const { id } = await params;
     const body = await request.json().catch(() => null);
 
@@ -28,13 +26,17 @@ export async function PATCH(
       );
     }
 
-    const updates: { title?: string; isStarred?: boolean; isArchived?: boolean } = {};
+    const updates: {
+      title?: string;
+      isStarred?: boolean;
+      isArchived?: boolean;
+    } = {};
 
     if (body.title !== undefined) updates.title = body.title;
     if (body.isStarred !== undefined) updates.isStarred = body.isStarred;
     if (body.isArchived !== undefined) updates.isArchived = body.isArchived;
 
-    const conversation = await updateConversation(userId, id, updates);
+    const conversation = await updateConversation(id, updates);
 
     return NextResponse.json(conversation, {
       headers: corsHeaders(origin),
@@ -44,6 +46,7 @@ export async function PATCH(
       err instanceof Error && "statusCode" in err
         ? (err as Error & { statusCode: number }).statusCode
         : 500;
+    console.error("[PATCH /api/imported-conversations/:id]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: statusCode, headers: corsHeaders(origin) }
@@ -61,10 +64,8 @@ export async function DELETE(
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const { id } = await params;
-    await softDelete(userId, id);
+    await softDelete(id);
 
     return NextResponse.json(
       { success: true },
@@ -75,6 +76,7 @@ export async function DELETE(
       err instanceof Error && "statusCode" in err
         ? (err as Error & { statusCode: number }).statusCode
         : 500;
+    console.error("[DELETE /api/imported-conversations/:id]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: statusCode, headers: corsHeaders(origin) }

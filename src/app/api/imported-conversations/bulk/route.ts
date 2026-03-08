@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../../cors";
-import { getUserId, bulkUpdate, bulkSoftDelete } from "@/lib/imported-conversations";
+import { bulkUpdate, bulkSoftDelete } from "@/lib/imported-conversations";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -13,8 +13,6 @@ export async function PATCH(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const body = await request.json().catch(() => null);
 
     if (!body || !Array.isArray(body.ids) || body.ids.length === 0) {
@@ -39,13 +37,11 @@ export async function PATCH(request: NextRequest) {
       updates.isArchived = body.updates.isArchived;
     }
 
-    const updated = await bulkUpdate(userId, body.ids, updates);
+    const updated = await bulkUpdate(body.ids, updates);
 
-    return NextResponse.json(
-      { updated },
-      { headers: corsHeaders(origin) }
-    );
+    return NextResponse.json({ updated }, { headers: corsHeaders(origin) });
   } catch (err) {
+    console.error("[PATCH /api/imported-conversations/bulk]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(origin) }
@@ -60,8 +56,6 @@ export async function DELETE(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const body = await request.json().catch(() => null);
 
     if (!body || !Array.isArray(body.ids) || body.ids.length === 0) {
@@ -71,13 +65,11 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const deleted = await bulkSoftDelete(userId, body.ids);
+    const deleted = await bulkSoftDelete(body.ids);
 
-    return NextResponse.json(
-      { deleted },
-      { headers: corsHeaders(origin) }
-    );
+    return NextResponse.json({ deleted }, { headers: corsHeaders(origin) });
   } catch (err) {
+    console.error("[DELETE /api/imported-conversations/bulk]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(origin) }

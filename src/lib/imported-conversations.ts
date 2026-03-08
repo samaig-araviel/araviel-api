@@ -1,25 +1,5 @@
-import { NextRequest } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { encrypt, decrypt } from "@/lib/encryption";
-
-// ---------------------------------------------------------------------------
-// Auth helper
-// ---------------------------------------------------------------------------
-
-// Default user ID used until real authentication is implemented.
-// All existing routes in the codebase operate without auth; this matches
-// that pattern while keeping user_id scoping in place for a smooth
-// migration to real auth later.
-const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000";
-
-/**
- * Extract user ID from request. Uses x-user-id header if present,
- * otherwise falls back to a default placeholder.
- * Replace this with real auth (JWT / Supabase Auth) when ready.
- */
-export function getUserId(request: NextRequest): string {
-  return request.headers.get("x-user-id") || DEFAULT_USER_ID;
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,7 +25,6 @@ export interface ImportConversationInput {
 
 export interface ImportedConversationRow {
   id: string;
-  user_id: string;
   provider: string;
   provider_name: string;
   external_id: string | null;
@@ -75,7 +54,9 @@ export interface ImportedConversationResponse {
 // Mapping helpers
 // ---------------------------------------------------------------------------
 
-export function toResponse(row: ImportedConversationRow): ImportedConversationResponse {
+export function toResponse(
+  row: ImportedConversationRow
+): ImportedConversationResponse {
   return {
     id: row.id,
     externalId: row.external_id,
@@ -103,7 +84,11 @@ export function validateConversationInput(
   if (!c.provider || typeof c.provider !== "string" || !c.provider.trim()) {
     return `conversations[${index}].provider must be a non-empty string`;
   }
-  if (!c.providerName || typeof c.providerName !== "string" || !c.providerName.trim()) {
+  if (
+    !c.providerName ||
+    typeof c.providerName !== "string" ||
+    !c.providerName.trim()
+  ) {
     return `conversations[${index}].providerName must be a non-empty string`;
   }
   if (!c.title || typeof c.title !== "string" || !c.title.trim()) {
@@ -128,16 +113,13 @@ export function validateConversationInput(
 // ---------------------------------------------------------------------------
 
 const CONVERSATION_COLUMNS =
-  "id, user_id, provider, provider_name, external_id, title, message_count, is_starred, is_archived, deleted_at, created_at, updated_at";
+  "id, provider, provider_name, external_id, title, message_count, is_starred, is_archived, deleted_at, created_at, updated_at";
 
 /**
  * Bulk import conversations with encrypted messages.
- * Uses a Supabase RPC-based transaction via individual inserts wrapped in
- * application-level logic. Duplicates (by user_id+provider+external_id) are
- * skipped gracefully.
+ * Duplicates (by provider+external_id) are skipped gracefully.
  */
 export async function bulkImport(
-  userId: string,
   conversations: ImportConversationInput[]
 ): Promise<{
   imported: number;
@@ -157,7 +139,6 @@ export async function bulkImport(
     const { data: existing } = await supabase
       .from("imported_conversations")
       .select("provider, external_id")
-      .eq("user_id", userId)
       .not("external_id", "is", null)
       .in("external_id", externalIds);
 
@@ -169,14 +150,12 @@ export async function bulkImport(
   }
 
   const toInsert: {
-    conv: ImportConversationInput;
     convRow: Record<string, unknown>;
     msgRow: Record<string, unknown>;
   }[] = [];
   let skipped = 0;
 
   for (const conv of conversations) {
-    // Check duplicate
     if (
       conv.externalId &&
       existingSet.has(`${conv.provider}::${conv.externalId}`)
@@ -190,7 +169,6 @@ export async function bulkImport(
 
     const convRow = {
       id: convId,
-      user_id: userId,
       provider: conv.provider.trim(),
       provider_name: conv.providerName.trim(),
       external_id: conv.externalId?.trim() || null,
@@ -206,11 +184,10 @@ export async function bulkImport(
 
     const msgRow = {
       conversation_id: convId,
-      user_id: userId,
       messages_encrypted: encryptedMessages,
     };
 
-    toInsert.push({ conv, convRow, msgRow });
+    toInsert.push({ convRow, msgRow });
   }
 
   if (toInsert.length === 0) {
@@ -233,12 +210,9 @@ export async function bulkImport(
     .insert(toInsert.map((t) => t.msgRow));
 
   if (msgError) {
-    // Attempt to rollback conversation inserts
+    // Rollback conversation inserts
     const ids = toInsert.map((t) => t.convRow.id as string);
-    await supabase
-      .from("imported_conversations")
-      .delete()
-      .in("id", ids);
+    await supabase.from("imported_conversations").delete().in("id", ids);
     throw new Error(`Failed to import messages: ${msgError.message}`);
   }
 
@@ -252,23 +226,19 @@ export async function bulkImport(
 }
 
 /**
- * List imported conversations for a user with optional filters.
+ * List imported conversations with optional filters.
  */
-export async function listConversations(
-  userId: string,
-  filters: {
-    provider?: string;
-    archived?: boolean;
-    starred?: boolean;
-  }
-): Promise<ImportedConversationResponse[]> {
+export async function listConversations(filters: {
+  provider?: string;
+  archived?: boolean;
+  starred?: boolean;
+}): Promise<ImportedConversationResponse[]> {
   const supabase = getSupabase();
   const { archived = false, provider, starred } = filters;
 
   let query = supabase
     .from("imported_conversations")
     .select(CONVERSATION_COLUMNS)
-    .eq("user_id", userId)
     .is("deleted_at", null)
     .eq("is_archived", archived)
     .order("created_at", { ascending: false });
@@ -295,17 +265,15 @@ export async function listConversations(
  * Get decrypted messages for a single imported conversation.
  */
 export async function getMessages(
-  userId: string,
   conversationId: string
 ): Promise<ImportedMessage[]> {
   const supabase = getSupabase();
 
-  // Verify ownership and not soft-deleted
+  // Verify conversation exists and is not soft-deleted
   const { data: conv, error: convError } = await supabase
     .from("imported_conversations")
     .select("id")
     .eq("id", conversationId)
-    .eq("user_id", userId)
     .is("deleted_at", null)
     .single();
 
@@ -319,7 +287,6 @@ export async function getMessages(
     .from("imported_conversation_messages")
     .select("messages_encrypted")
     .eq("conversation_id", conversationId)
-    .eq("user_id", userId)
     .single();
 
   if (msgError || !msgRow) {
@@ -336,7 +303,6 @@ export async function getMessages(
  * Update metadata on a single imported conversation.
  */
 export async function updateConversation(
-  userId: string,
   conversationId: string,
   updates: { title?: string; isStarred?: boolean; isArchived?: boolean }
 ): Promise<ImportedConversationResponse> {
@@ -363,7 +329,6 @@ export async function updateConversation(
     .from("imported_conversations")
     .update(updatePayload)
     .eq("id", conversationId)
-    .eq("user_id", userId)
     .is("deleted_at", null)
     .select(CONVERSATION_COLUMNS)
     .single();
@@ -381,7 +346,6 @@ export async function updateConversation(
  * Bulk update metadata on multiple imported conversations.
  */
 export async function bulkUpdate(
-  userId: string,
   ids: string[],
   updates: { isStarred?: boolean; isArchived?: boolean }
 ): Promise<number> {
@@ -402,7 +366,6 @@ export async function bulkUpdate(
     .from("imported_conversations")
     .update(updatePayload)
     .in("id", ids)
-    .eq("user_id", userId)
     .is("deleted_at", null)
     .select("id");
 
@@ -416,17 +379,13 @@ export async function bulkUpdate(
 /**
  * Soft-delete a single imported conversation.
  */
-export async function softDelete(
-  userId: string,
-  conversationId: string
-): Promise<void> {
+export async function softDelete(conversationId: string): Promise<void> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from("imported_conversations")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", conversationId)
-    .eq("user_id", userId)
     .is("deleted_at", null)
     .select("id")
     .single();
@@ -441,17 +400,13 @@ export async function softDelete(
 /**
  * Bulk soft-delete imported conversations.
  */
-export async function bulkSoftDelete(
-  userId: string,
-  ids: string[]
-): Promise<number> {
+export async function bulkSoftDelete(ids: string[]): Promise<number> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from("imported_conversations")
     .update({ deleted_at: new Date().toISOString() })
     .in("id", ids)
-    .eq("user_id", userId)
     .is("deleted_at", null)
     .select("id");
 

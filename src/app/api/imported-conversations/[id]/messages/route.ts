@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
-import { getUserId, getMessages } from "@/lib/imported-conversations";
+import { getMessages } from "@/lib/imported-conversations";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -16,20 +16,16 @@ export async function GET(
   const origin = request.headers.get("origin");
 
   try {
-    const userId = getUserId(request);
-
     const { id } = await params;
-    const messages = await getMessages(userId, id);
+    const messages = await getMessages(id);
 
-    return NextResponse.json(
-      { messages },
-      { headers: corsHeaders(origin) }
-    );
+    return NextResponse.json({ messages }, { headers: corsHeaders(origin) });
   } catch (err) {
     const statusCode =
       err instanceof Error && "statusCode" in err
         ? (err as Error & { statusCode: number }).statusCode
         : 500;
+    console.error("[GET /api/imported-conversations/:id/messages]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: statusCode, headers: corsHeaders(origin) }
