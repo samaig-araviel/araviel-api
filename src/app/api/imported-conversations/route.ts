@@ -7,6 +7,7 @@ import {
   validateConversationInput,
   type ImportConversationInput,
 } from "@/lib/imported-conversations";
+import { isClaudeExportFormat, transformClaudeExport } from "@/lib/claude-export-transform";
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
@@ -21,7 +22,8 @@ export async function POST(request: NextRequest) {
   try {
     const userId = getUserId(request);
 
-    const body = await request.json().catch(() => null);
+    const raw = await request.json().catch(() => null);
+    const body = isClaudeExportFormat(raw) ? transformClaudeExport(raw) : raw;
     if (!body || !Array.isArray(body.conversations) || body.conversations.length === 0) {
       return NextResponse.json(
         { error: "conversations must be a non-empty array" },
