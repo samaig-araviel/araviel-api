@@ -11,6 +11,7 @@ export const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set<SupportedProvide
 export interface ChatRequest {
   conversationId?: string;
   subConversationId?: string;
+  importedConversationId?: string;
   message: string;
   userTier?: string;
   modality?: string;
