@@ -13,6 +13,9 @@ import type {
 } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { getChartInstructions } from "@/lib/prompts/chart-instructions";
+import { getMessages as getImportedMessages } from "@/lib/imported-conversations";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function validateChatRequest(body: unknown): ChatRequest {
   if (!body || typeof body !== "object") {
@@ -25,9 +28,18 @@ export function validateChatRequest(body: unknown): ChatRequest {
     throw new Error("message is required and must be a non-empty string");
   }
 
+  let importedConversationId: string | undefined;
+  if (typeof req.importedConversationId === "string" && req.importedConversationId.trim()) {
+    if (!UUID_RE.test(req.importedConversationId.trim())) {
+      throw new Error("importedConversationId must be a valid UUID");
+    }
+    importedConversationId = req.importedConversationId.trim();
+  }
+
   return {
     conversationId: typeof req.conversationId === "string" ? req.conversationId : undefined,
     subConversationId: typeof req.subConversationId === "string" ? req.subConversationId : undefined,
+    importedConversationId,
     message: req.message.trim(),
     userTier: typeof req.userTier === "string" ? req.userTier : "free",
     modality: typeof req.modality === "string" ? req.modality : "text",
@@ -259,6 +271,23 @@ export async function fetchConversationHistory(
     role: msg.role as ConversationMessage["role"],
     content: msg.content,
   }));
+}
+
+/**
+ * Fetch messages from an imported conversation and convert them to
+ * ConversationMessage format suitable for prepending to native history.
+ */
+export async function fetchImportedConversationHistory(
+  importedConversationId: string
+): Promise<ConversationMessage[]> {
+  const messages = await getImportedMessages(importedConversationId);
+
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      role: m.role as ConversationMessage["role"],
+      content: m.content,
+    }));
 }
 
 export async function getPreviousModelId(

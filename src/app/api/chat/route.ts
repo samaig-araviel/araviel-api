@@ -22,6 +22,7 @@ import {
   shouldEnableThinking,
   findSupportedBackup,
   validateSubConversation,
+  fetchImportedConversationHistory,
   isImageGenerationModel,
   canModelGenerateImages,
   getImageCapableModels,
@@ -99,7 +100,43 @@ async function handleChat(
     await saveUserMessage(conversationId, chatReq.message, subConversationId);
 
     // 4. Fetch conversation history (sub-conversation history includes highlighted text context)
-    const history = await fetchConversationHistory(conversationId, subConversationId);
+    let history = await fetchConversationHistory(conversationId, subConversationId);
+
+    // 4b. If an imported conversation ID is provided, prepend those messages
+    if (chatReq.importedConversationId) {
+      try {
+        const importedMessages = await fetchImportedConversationHistory(
+          chatReq.importedConversationId
+        );
+
+        if (importedMessages.length > 0) {
+          const MAX_TOTAL_MESSAGES = 40;
+          const nativeCount = history.length;
+          const availableSlots = Math.max(0, MAX_TOTAL_MESSAGES - nativeCount);
+          // Truncate imported messages from the front (oldest first) if over cap
+          const trimmedImported =
+            importedMessages.length > availableSlots
+              ? importedMessages.slice(importedMessages.length - availableSlots)
+              : importedMessages;
+
+          history = [...trimmedImported, ...history];
+        }
+      } catch (err) {
+        const statusCode = (err as Error & { statusCode?: number }).statusCode;
+        if (statusCode === 404) {
+          await sendSSE(writer, encoder, {
+            type: "error",
+            data: {
+              message: "Imported conversation not found",
+              code: "NOT_FOUND",
+            },
+          });
+          await writer.close();
+          return;
+        }
+        throw err;
+      }
+    }
 
     // 5. Get previous model for conversation coherence
     const previousModelUsed = await getPreviousModelId(conversationId);
