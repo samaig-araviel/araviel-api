@@ -381,7 +381,7 @@ export function resolveModel(
 
 function guessProviderFromModelId(modelId: string): string {
   if (modelId.startsWith("claude")) return "anthropic";
-  if (modelId.startsWith("gpt") || modelId.startsWith("o3") || modelId.startsWith("o4") || modelId.startsWith("dall-e")) return "openai";
+  if (modelId.startsWith("gpt") || modelId.startsWith("o3") || modelId.startsWith("o4") || modelId.startsWith("dall-e") || modelId.startsWith("gpt-image")) return "openai";
   if (modelId.startsWith("gemini") || modelId.startsWith("imagen")) return "google";
   if (modelId.startsWith("sonar")) return "perplexity";
   if (modelId.startsWith("stable-diffusion")) return "stability";
@@ -389,7 +389,15 @@ function guessProviderFromModelId(modelId: string): string {
 }
 
 /** Dedicated image generation models that use separate image APIs (not chat/streaming). */
-const DEDICATED_IMAGE_MODELS = new Set(["dall-e-3", "imagen-4", "imagen-3", "stable-diffusion-3.5"]);
+const DEDICATED_IMAGE_MODELS = new Set([
+  "dall-e-3",
+  "gpt-image-1",
+  "gpt-image-1.5",
+  "gpt-image-1-mini",
+  "imagen-4",
+  "imagen-3",
+  "stable-diffusion-3.5",
+]);
 
 export function isImageGenerationModel(modelId: string): boolean {
   return DEDICATED_IMAGE_MODELS.has(modelId);
@@ -419,6 +427,8 @@ export function getImageCapableModels(): {
 } {
   return {
     dedicated: [
+      { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "OpenAI" },
+      { id: "gpt-image-1-mini", name: "GPT Image 1 Mini", provider: "OpenAI" },
       { id: "dall-e-3", name: "DALL-E 3", provider: "OpenAI" },
       { id: "imagen-4", name: "Imagen 4", provider: "Google" },
       { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "Stability AI" },
