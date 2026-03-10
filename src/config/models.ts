@@ -45,6 +45,9 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "sonar-pro": { inputPerMillion: 3, outputPerMillion: 15 },
 
   // Image generation models
+  "gpt-image-1.5": { inputPerMillion: 0, outputPerMillion: 34 },
+  "gpt-image-1-mini": { inputPerMillion: 0, outputPerMillion: 8 },
+  "gpt-image-1": { inputPerMillion: 0, outputPerMillion: 19 },
   "dall-e-3": { inputPerMillion: 40, outputPerMillion: 80 },
   "imagen-4": { inputPerMillion: 40, outputPerMillion: 60 },
   "imagen-3": { inputPerMillion: 40, outputPerMillion: 60 },

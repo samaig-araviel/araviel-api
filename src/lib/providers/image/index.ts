@@ -19,7 +19,7 @@ export async function generateImage(
 ): Promise<ImageGenResult> {
   switch (provider) {
     case "openai":
-      return generateOpenAIImage(prompt);
+      return generateOpenAIImage(modelId, prompt);
     case "google":
       return generateGoogleImage(modelId, prompt);
     case "stability":
