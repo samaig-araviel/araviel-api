@@ -70,6 +70,10 @@ export async function PATCH(
       updates.project_id = body.project_id;
     }
 
+    if (typeof body.title === "string") {
+      updates.title = body.title.trim() || updates.title;
+    }
+
     const supabase = getSupabase();
 
     const { data, error } = await supabase
@@ -95,6 +99,74 @@ export async function PATCH(
         updatedAt: data.updated_at,
         projectId: data.project_id ?? null,
       },
+      { headers: corsHeaders(origin) }
+    );
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500, headers: corsHeaders(origin) }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const origin = request.headers.get("origin");
+
+  try {
+    const { id } = await params;
+    const supabase = getSupabase();
+
+    // Delete sub-conversation messages, sub-conversations, then messages, then conversation
+    // 1. Find all sub-conversations for this conversation
+    const { data: subConvs } = await supabase
+      .from("sub_conversations")
+      .select("id")
+      .eq("conversation_id", id);
+
+    if (subConvs && subConvs.length > 0) {
+      const subIds = subConvs.map((sc: { id: string }) => sc.id);
+      // 2. Delete sub-conversation messages
+      await supabase
+        .from("messages")
+        .delete()
+        .in("sub_conversation_id", subIds);
+      // 3. Delete sub-conversations
+      await supabase.from("sub_conversations").delete().eq("conversation_id", id);
+    }
+
+    // 4. Delete routing logs for messages in this conversation
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("conversation_id", id);
+
+    if (msgs && msgs.length > 0) {
+      const msgIds = msgs.map((m: { id: string }) => m.id);
+      await supabase.from("routing_logs").delete().in("message_id", msgIds);
+      await supabase.from("api_call_logs").delete().in("message_id", msgIds);
+    }
+
+    // 5. Delete messages
+    await supabase.from("messages").delete().eq("conversation_id", id);
+
+    // 6. Delete the conversation
+    const { error } = await supabase
+      .from("conversations")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500, headers: corsHeaders(origin) }
+      );
+    }
+
+    return NextResponse.json(
+      { success: true },
       { headers: corsHeaders(origin) }
     );
   } catch (err) {
