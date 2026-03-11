@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const [{ data, error }, { count, error: countError }] = await Promise.all([
       supabase
         .from("conversations")
-        .select("id, title, created_at, updated_at")
+        .select("id, title, created_at, updated_at, project_id")
         .order("updated_at", { ascending: false })
         .range(offset, offset + limit - 1),
       supabase
@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
       title: c.title,
       createdAt: c.created_at,
       updatedAt: c.updated_at,
+      projectId: c.project_id ?? null,
     }));
 
     return NextResponse.json(

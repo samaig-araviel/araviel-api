@@ -12,6 +12,7 @@ export interface ChatRequest {
   conversationId?: string;
   subConversationId?: string;
   importedConversationId?: string;
+  projectId?: string;
   message: string;
   userTier?: string;
   modality?: string;

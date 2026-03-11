@@ -92,7 +92,8 @@ async function handleChat(
     } else {
       conversationId = await getOrCreateConversation(
         chatReq.conversationId,
-        chatReq.message
+        chatReq.message,
+        chatReq.projectId
       );
     }
 
