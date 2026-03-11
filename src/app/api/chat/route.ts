@@ -18,6 +18,7 @@ import {
   getPreviousModelId,
   resolveModel,
   buildSystemPrompt,
+  getProjectInstructionsForConversation,
   resolveWebSearch,
   shouldEnableThinking,
   findSupportedBackup,
@@ -256,11 +257,14 @@ async function handleChat(
       },
     });
 
-    // 12. Determine if image generation is needed
+    // 12. Fetch project instructions for system prompt
+    const projectInstructions = await getProjectInstructionsForConversation(conversationId);
+
+    // 13. Determine if image generation is needed
     const enableImageGeneration =
       adeResponse.analysis.intent === "image_generation" || chatReq.modality === "image";
 
-    const systemPrompt = buildSystemPrompt();
+    const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined);
     const enableWebSearch = shouldUseWebSearch;
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 

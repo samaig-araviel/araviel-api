@@ -450,7 +450,7 @@ export function getImageCapableModels(): {
   };
 }
 
-export function buildSystemPrompt(): string {
+export function buildSystemPrompt(projectInstructions?: string): string {
   const basePrompt = [
     "You are a helpful AI assistant powered by Araviel, an intelligent AI platform.",
     "Provide clear, accurate, and well-structured responses.",
@@ -458,7 +458,41 @@ export function buildSystemPrompt(): string {
     "Be concise but thorough. If you are unsure about something, say so.",
   ].join(" ");
 
-  return `${basePrompt}\n\n${getChartInstructions()}`;
+  let prompt = `${basePrompt}\n\n${getChartInstructions()}`;
+
+  if (projectInstructions && projectInstructions.trim()) {
+    prompt += `\n\n--- Project Instructions ---\nThe following instructions were set by the user for this project. Follow them for all responses in this conversation:\n\n${projectInstructions}`;
+  }
+
+  return prompt;
+}
+
+export async function getProjectInstructionsForConversation(
+  conversationId: string
+): Promise<string | null> {
+  const supabase = getSupabase();
+
+  const { data: conversation, error: convError } = await supabase
+    .from("conversations")
+    .select("project_id")
+    .eq("id", conversationId)
+    .single();
+
+  if (convError || !conversation?.project_id) {
+    return null;
+  }
+
+  const { data: project, error: projError } = await supabase
+    .from("projects")
+    .select("instructions")
+    .eq("id", conversation.project_id)
+    .single();
+
+  if (projError || !project?.instructions) {
+    return null;
+  }
+
+  return project.instructions;
 }
 
 export function resolveWebSearch(
