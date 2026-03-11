@@ -13,17 +13,28 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
+    const projectId = searchParams.get("projectId");
+
     const supabase = getSupabase();
 
+    let dataQuery = supabase
+      .from("conversations")
+      .select("id, title, created_at, updated_at, project_id")
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    let countQuery = supabase
+      .from("conversations")
+      .select("id", { count: "exact", head: true });
+
+    if (projectId) {
+      dataQuery = dataQuery.eq("project_id", projectId);
+      countQuery = countQuery.eq("project_id", projectId);
+    }
+
     const [{ data, error }, { count, error: countError }] = await Promise.all([
-      supabase
-        .from("conversations")
-        .select("id, title, created_at, updated_at, project_id")
-        .order("updated_at", { ascending: false })
-        .range(offset, offset + limit - 1),
-      supabase
-        .from("conversations")
-        .select("id", { count: "exact", head: true }),
+      dataQuery,
+      countQuery,
     ]);
 
     if (error || countError) {
