@@ -40,6 +40,7 @@ export function validateChatRequest(body: unknown): ChatRequest {
     conversationId: typeof req.conversationId === "string" ? req.conversationId : undefined,
     subConversationId: typeof req.subConversationId === "string" ? req.subConversationId : undefined,
     importedConversationId,
+    projectId: typeof req.projectId === "string" ? req.projectId : undefined,
     message: req.message.trim(),
     userTier: typeof req.userTier === "string" ? req.userTier : "free",
     modality: typeof req.modality === "string" ? req.modality : "text",
@@ -55,7 +56,8 @@ export function validateChatRequest(body: unknown): ChatRequest {
 
 export async function getOrCreateConversation(
   conversationId: string | undefined,
-  messagePreview: string
+  messagePreview: string,
+  projectId?: string
 ): Promise<string> {
   const supabase = getSupabase();
 
@@ -76,12 +78,18 @@ export async function getOrCreateConversation(
   const title = messagePreview.slice(0, 50) + (messagePreview.length > 50 ? "..." : "");
   const now = new Date().toISOString();
 
-  const { error } = await supabase.from("conversations").insert({
+  const row: Record<string, unknown> = {
     id,
     title,
     created_at: now,
     updated_at: now,
-  });
+  };
+
+  if (projectId) {
+    row.project_id = projectId;
+  }
+
+  const { error } = await supabase.from("conversations").insert(row);
 
   if (error) {
     throw new Error(`Failed to create conversation: ${error.message}`);
