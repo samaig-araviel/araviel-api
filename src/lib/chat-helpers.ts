@@ -413,8 +413,8 @@ export function isImageGenerationModel(modelId: string): boolean {
 
 /**
  * Chat models that support native image generation via provider-specific tools.
- * OpenAI: image_generation tool in Responses API (GPT-4o series, GPT-4.1 series, o-series).
- * Google: responseModalities for Gemini models.
+ * OpenAI: image_generation tool in Responses API (GPT-4o, GPT-4.1, GPT-5 series, o3).
+ * Google: responseModalities for Gemini image-capable models only.
  * Models NOT in this set should fall back to a dedicated image model.
  */
 const NATIVE_IMAGE_GEN_MODELS = new Set([
@@ -424,13 +424,16 @@ const NATIVE_IMAGE_GEN_MODELS = new Set([
   "gpt-4.1",
   "gpt-4.1-mini",
   "gpt-4.1-nano",
+  "gpt-5",
+  "gpt-5.2",
+  "gpt-5.4",
+  "gpt-5.4-pro",
+  "gpt-5-nano",
   "o3",
-  "o3-pro",
-  "o4-mini",
-  // Google — responseModalities
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
+  // Google — responseModalities (only -image model variants)
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image-preview",
+  "gemini-3-pro-image-preview",
 ]);
 
 /**
@@ -458,10 +461,10 @@ export function getImageCapableModels(): {
       { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "Stability AI" },
     ],
     nativeChat: [
+      { id: "gpt-5.4", name: "GPT-5.4", provider: "OpenAI" },
       { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI" },
       { id: "gpt-4.1", name: "GPT-4.1", provider: "OpenAI" },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google" },
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google" },
+      { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image", provider: "Google" },
     ],
   };
 }

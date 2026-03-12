@@ -2,17 +2,36 @@ import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import type { AIProvider, ProviderConfig, ProviderStreamEvent } from "./base";
 import type { Citation, ConversationMessage, TokenUsage } from "@/lib/types";
 
-function getThinkingBudget(complexity: string, enableThinking: boolean): number | undefined {
-  if (!enableThinking) return 0;
+/** Gemini 2.5 models use thinkingBudget (integer). */
+function getThinkingBudget(complexity: string): number {
   switch (complexity) {
     case "demanding":
-      return 4096;
+      return 8192;
     case "standard":
-      return 1024;
+      return 2048;
     default:
       return 0;
   }
 }
+
+/** Gemini 3.x models use thinkingLevel (string enum). */
+function getThinkingLevel(complexity: string): string {
+  switch (complexity) {
+    case "demanding":
+      return "high";
+    case "standard":
+      return "medium";
+    default:
+      return "low";
+  }
+}
+
+/** Models that support native image generation via responseModalities. */
+const GEMINI_IMAGE_GEN_MODELS = new Set([
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image-preview",
+  "gemini-3-pro-image-preview",
+]);
 
 function buildContents(messages: ConversationMessage[]): Content[] {
   return messages.map((msg) => ({
@@ -31,11 +50,20 @@ export class GeminiProvider implements AIProvider {
   }
 
   async *stream(config: ProviderConfig): AsyncGenerator<ProviderStreamEvent> {
-    const isFlashModel = config.modelId.includes("flash");
-    const thinkingBudget = getThinkingBudget(
-      config.enableThinking ? "demanding" : "standard",
-      config.modelId.includes("2.5")
-    );
+    const isGemini3 = config.modelId.includes("3.") || config.modelId.includes("3-");
+    const isGemini25 = config.modelId.includes("2.5");
+    const complexity = config.enableThinking ? "demanding" : "standard";
+
+    // Build thinking config based on model generation
+    let thinkingConfig: Record<string, unknown> | undefined;
+    if (isGemini3) {
+      // Gemini 3.x: use thinkingLevel (string enum)
+      thinkingConfig = { thinkingLevel: getThinkingLevel(complexity) };
+    } else if (isGemini25) {
+      // Gemini 2.5: use thinkingBudget (integer), -1 for dynamic
+      const budget = config.enableThinking ? getThinkingBudget(complexity) : 0;
+      thinkingConfig = { thinkingBudget: budget };
+    }
 
     const tools: Array<{ googleSearch: Record<string, never> }> = [];
     if (config.enableWebSearch) {
@@ -44,16 +72,17 @@ export class GeminiProvider implements AIProvider {
 
     const contents = buildContents(config.messages);
 
+    // Only enable responseModalities for models that actually support native image gen
+    const supportsImageGen = config.enableImageGeneration && GEMINI_IMAGE_GEN_MODELS.has(config.modelId);
+
     const response = await this.ai.models.generateContentStream({
       model: config.modelId,
       contents,
       config: {
         systemInstruction: config.systemPrompt,
         ...(tools.length > 0 ? { tools } : {}),
-        ...(thinkingBudget !== undefined && !isFlashModel
-          ? { thinkingConfig: { thinkingBudget } }
-          : {}),
-        ...(config.enableImageGeneration
+        ...(thinkingConfig ? { thinkingConfig } : {}),
+        ...(supportsImageGen
           ? { responseModalities: ["TEXT", "IMAGE"] }
           : {}),
       },
