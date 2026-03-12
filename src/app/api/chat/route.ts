@@ -423,10 +423,10 @@ async function handleChat(
 
     // Guard: If image generation is needed but the model can't do it,
     // try to auto-fallback to an image-capable backup, or return a helpful response.
-    if (enableImageGeneration && !canModelGenerateImages(model.id, model.provider)) {
+    if (enableImageGeneration && !canModelGenerateImages(model.id)) {
       // Try to find an image-capable backup model
       const imageBackup = backupModels.find(
-        (b) => SUPPORTED_PROVIDERS.has(b.provider) && canModelGenerateImages(b.id, b.provider)
+        (b) => SUPPORTED_PROVIDERS.has(b.provider) && canModelGenerateImages(b.id)
       );
 
       if (imageBackup) {
@@ -538,38 +538,27 @@ async function handleChat(
         }
       }
 
-      // No image-capable backup found, or backup also failed — send helpful response
+      // No image-capable backup in ADE alternates — auto-fallback to dedicated image model
+      const dedicatedFallback = await tryDedicatedImageFallback(
+        chatReq.message, model, apiCallLogs, writer, encoder
+      );
+      if (dedicatedFallback) {
+        await finalize(
+          messageId, conversationId, dedicatedFallback,
+          model, backupModels, adeResponse, adeLatencyMs,
+          apiCallLogs, writer, encoder, subConversationId
+        );
+        return;
+      }
+
+      // Dedicated image model also failed — send helpful response
       const imageModels = getImageCapableModels();
-      const suggestedPlatforms = adeResponse.fallback?.suggestedPlatforms ?? [];
-
       let helpContent = `### Unable to Generate Images\n\n`;
-      helpContent += `**${model.name}** is a text-only model and cannot create images. `;
-      helpContent += `To generate images, please select one of the image-capable models below.\n\n`;
-
-      helpContent += `---\n\n`;
-      helpContent += `#### Dedicated Image Models\n`;
-      helpContent += `These models are purpose-built for image generation:\n\n`;
+      helpContent += `**${model.name}** cannot create images and the fallback image model also failed. `;
+      helpContent += `Please try again or select one of these image-capable models:\n\n`;
       for (const m of imageModels.dedicated) {
-        helpContent += `- **${m.name}** *(${m.provider})* — \`${m.id}\`\n`;
+        helpContent += `- **${m.name}** *(${m.provider})*\n`;
       }
-
-      helpContent += `\n#### Chat Models with Image Generation\n`;
-      helpContent += `These models can generate images alongside text responses:\n\n`;
-      for (const m of imageModels.nativeChat) {
-        helpContent += `- **${m.name}** *(${m.provider})* — \`${m.id}\`\n`;
-      }
-
-      if (suggestedPlatforms.length > 0) {
-        helpContent += `\n---\n\n`;
-        helpContent += `#### External Platforms\n`;
-        helpContent += `You can also try these dedicated image generation platforms:\n\n`;
-        for (const platform of suggestedPlatforms) {
-          helpContent += `- ${platform}\n`;
-        }
-      }
-
-      helpContent += `\n---\n\n`;
-      helpContent += `*Select an image-capable model from the model picker and try again.*`;
 
       await sendSSE(writer, encoder, {
         type: "delta",
@@ -587,17 +576,9 @@ async function handleChat(
       };
 
       await finalize(
-        messageId,
-        conversationId,
-        helpStreamResult,
-        model,
-        backupModels,
-        adeResponse,
-        adeLatencyMs,
-        apiCallLogs,
-        writer,
-        encoder,
-        subConversationId
+        messageId, conversationId, helpStreamResult,
+        model, backupModels, adeResponse, adeLatencyMs,
+        apiCallLogs, writer, encoder, subConversationId
       );
       return;
     }
@@ -643,6 +624,20 @@ async function handleChat(
         );
 
         if (!backupResult.success) {
+          // If image generation was requested, try a dedicated image model as last resort
+          if (enableImageGeneration) {
+            const dedicatedFallback = await tryDedicatedImageFallback(
+              chatReq.message, model, apiCallLogs, writer, encoder
+            );
+            if (dedicatedFallback) {
+              await finalize(
+                messageId, conversationId, dedicatedFallback,
+                model, backupModels, adeResponse, adeLatencyMs,
+                apiCallLogs, writer, encoder, subConversationId
+              );
+              return;
+            }
+          }
           await sendSSE(writer, encoder, {
             type: "error",
             data: {
@@ -668,6 +663,20 @@ async function handleChat(
           subConversationId
         );
       } else {
+        // No backup model — if image gen was requested, try a dedicated image model
+        if (enableImageGeneration) {
+          const dedicatedFallback = await tryDedicatedImageFallback(
+            chatReq.message, model, apiCallLogs, writer, encoder
+          );
+          if (dedicatedFallback) {
+            await finalize(
+              messageId, conversationId, dedicatedFallback,
+              model, backupModels, adeResponse, adeLatencyMs,
+              apiCallLogs, writer, encoder, subConversationId
+            );
+            return;
+          }
+        }
         await sendSSE(writer, encoder, {
           type: "error",
           data: {
@@ -722,6 +731,77 @@ interface ApiCallLogEntry {
   statusCode: number;
   latencyMs: number;
   errorMessage?: string;
+}
+
+/** Default dedicated image model used as a last-resort fallback when chat models can't generate images. */
+const FALLBACK_IMAGE_MODEL = { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "openai" };
+
+/**
+ * Last-resort fallback: generate an image using a dedicated image model when
+ * the selected chat model doesn't support native image generation.
+ */
+async function tryDedicatedImageFallback(
+  prompt: string,
+  originalModel: ModelInfo,
+  apiCallLogs: ApiCallLogEntry[],
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  encoder: TextEncoder
+): Promise<StreamResult | null> {
+  const imgModel = FALLBACK_IMAGE_MODEL;
+  const start = Date.now();
+
+  try {
+    await sendSSE(writer, encoder, {
+      type: "error",
+      data: {
+        message: `${originalModel.name} cannot generate images. Using ${imgModel.name} instead...`,
+        code: "PROVIDER_RETRY",
+      },
+    });
+
+    const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt);
+    const latencyMs = Date.now() - start;
+
+    apiCallLogs.push({
+      provider: imgModel.provider,
+      modelId: imgModel.id,
+      statusCode: 200,
+      latencyMs,
+    });
+
+    await sendSSE(writer, encoder, {
+      type: "image_generation",
+      data: {
+        url: imageResult.url,
+        prompt,
+        model: imgModel.name,
+        provider: imgModel.provider,
+        size: imageResult.size ?? "1024x1024",
+        style: imageResult.style ?? null,
+      },
+    });
+
+    const markdownContent = `![Generated image](${imageResult.url})`;
+    return {
+      success: true,
+      content: markdownContent,
+      thinkingContent: "",
+      citations: [],
+      usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+      latencyMs,
+      webSearchUsed: false,
+    };
+  } catch (err) {
+    const latencyMs = Date.now() - start;
+    apiCallLogs.push({
+      provider: imgModel.provider,
+      modelId: imgModel.id,
+      statusCode: 500,
+      latencyMs,
+      errorMessage: err instanceof Error ? err.message : "Dedicated image fallback failed",
+    });
+    return null;
+  }
 }
 
 async function streamFromProvider(

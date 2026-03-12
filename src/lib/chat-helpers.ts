@@ -412,17 +412,33 @@ export function isImageGenerationModel(modelId: string): boolean {
 }
 
 /**
- * Providers whose chat models support native image generation
- * (OpenAI via image_generation tool in Responses API, Google via responseModalities).
+ * Chat models that support native image generation via provider-specific tools.
+ * OpenAI: image_generation tool in Responses API (GPT-4o series, GPT-4.1 series, o-series).
+ * Google: responseModalities for Gemini models.
+ * Models NOT in this set should fall back to a dedicated image model.
  */
-const NATIVE_IMAGE_GEN_PROVIDERS = new Set(["openai", "google"]);
+const NATIVE_IMAGE_GEN_MODELS = new Set([
+  // OpenAI — image_generation tool in Responses API
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "o3",
+  "o3-pro",
+  "o4-mini",
+  // Google — responseModalities
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+]);
 
 /**
  * Check whether a model can generate images — either as a dedicated image model
- * or as a chat model with native image generation support.
+ * or as a chat model with verified native image generation support.
  */
-export function canModelGenerateImages(modelId: string, provider: string): boolean {
-  return DEDICATED_IMAGE_MODELS.has(modelId) || NATIVE_IMAGE_GEN_PROVIDERS.has(provider);
+export function canModelGenerateImages(modelId: string): boolean {
+  return DEDICATED_IMAGE_MODELS.has(modelId) || NATIVE_IMAGE_GEN_MODELS.has(modelId);
 }
 
 /**
@@ -442,8 +458,8 @@ export function getImageCapableModels(): {
       { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "Stability AI" },
     ],
     nativeChat: [
-      { id: "gpt-5", name: "GPT-5", provider: "OpenAI" },
       { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI" },
+      { id: "gpt-4.1", name: "GPT-4.1", provider: "OpenAI" },
       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google" },
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google" },
     ],
