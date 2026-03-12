@@ -575,6 +575,9 @@ export async function createSubConversation(
     conversation_id: conversationId,
     parent_message_id: parentMessageId,
     highlighted_text: highlightedText,
+    is_starred: false,
+    is_archived: false,
+    is_reported: false,
     created_at: now,
     updated_at: now,
   };

@@ -1,0 +1,89 @@
+import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
+import { getSupabase } from "@/lib/supabase";
+import { corsHeaders, handleCorsOptions } from "../../../../../cors";
+
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; messageId: string }> }
+) {
+  const origin = request.headers.get("origin");
+
+  try {
+    const { id: conversationId, messageId } = await params;
+    const body = await request.json().catch(() => null);
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "Request body is required" },
+        { status: 400, headers: corsHeaders(origin) }
+      );
+    }
+
+    const { feedback } = body;
+
+    if (feedback !== null && feedback !== "like" && feedback !== "dislike") {
+      return NextResponse.json(
+        { error: "Invalid feedback. Must be \"like\", \"dislike\", or null" },
+        { status: 400, headers: corsHeaders(origin) }
+      );
+    }
+
+    const supabase = getSupabase();
+
+    if (feedback === null) {
+      // Delete existing feedback
+      const { error } = await supabase
+        .from("message_feedback")
+        .delete()
+        .eq("message_id", messageId);
+
+      if (error) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: 500, headers: corsHeaders(origin) }
+        );
+      }
+
+      return NextResponse.json(
+        { success: true, feedback: null },
+        { headers: corsHeaders(origin) }
+      );
+    }
+
+    // Upsert feedback
+    const { error } = await supabase
+      .from("message_feedback")
+      .upsert(
+        {
+          id: randomUUID(),
+          message_id: messageId,
+          conversation_id: conversationId,
+          feedback,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "message_id" }
+      );
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500, headers: corsHeaders(origin) }
+      );
+    }
+
+    return NextResponse.json(
+      { success: true, feedback },
+      { headers: corsHeaders(origin) }
+    );
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500, headers: corsHeaders(origin) }
+    );
+  }
+}

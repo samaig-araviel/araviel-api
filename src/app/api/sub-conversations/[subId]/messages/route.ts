@@ -23,9 +23,20 @@ interface FormattedMessage {
   costUsd?: number | null;
   latencyMs?: number | null;
   adeLatencyMs?: number | null;
+  feedback?: string | null;
 }
 
-function formatMessage(msg: DBMessage): FormattedMessage {
+type DBMessageWithFeedback = DBMessage & {
+  message_feedback?: { feedback: string }[] | null;
+};
+
+function formatMessage(msg: DBMessageWithFeedback): FormattedMessage {
+  const feedbackRows = msg.message_feedback;
+  const feedback =
+    Array.isArray(feedbackRows) && feedbackRows.length > 0
+      ? feedbackRows[0].feedback
+      : null;
+
   const base: FormattedMessage = {
     id: msg.id,
     conversationId: msg.conversation_id,
@@ -33,6 +44,7 @@ function formatMessage(msg: DBMessage): FormattedMessage {
     role: msg.role,
     content: msg.content,
     createdAt: msg.created_at,
+    feedback,
   };
 
   if (msg.role !== "assistant") {
@@ -102,7 +114,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("messages")
-      .select("*")
+      .select("*, message_feedback(feedback)")
       .eq("sub_conversation_id", subId)
       .order("created_at", { ascending: true })
       .range(offset, offset + limit - 1);
@@ -114,7 +126,7 @@ export async function GET(
       );
     }
 
-    const messages = ((data as DBMessage[]) ?? []).map(formatMessage);
+    const messages = ((data as DBMessageWithFeedback[]) ?? []).map(formatMessage);
 
     return NextResponse.json(
       {

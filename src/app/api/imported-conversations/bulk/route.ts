@@ -41,7 +41,6 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ updated }, { headers: corsHeaders(origin) });
   } catch (err) {
-    console.error("[PATCH /api/imported-conversations/bulk]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(origin) }
@@ -69,7 +68,6 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ deleted }, { headers: corsHeaders(origin) });
   } catch (err) {
-    console.error("[DELETE /api/imported-conversations/bulk]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(origin) }
