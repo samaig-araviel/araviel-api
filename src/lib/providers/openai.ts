@@ -4,6 +4,23 @@ import type { Citation, ConversationMessage, TokenUsage } from "@/lib/types";
 
 const REASONING_MODELS = new Set(["o3", "o3-pro", "o4-mini"]);
 
+/**
+ * Models that support the `image_generation` tool in the Responses API.
+ * Per OpenAI docs, this tool is available for GPT-4o series, GPT-4.1 series,
+ * and o-series models. For other models, image generation should be routed
+ * to a dedicated image model instead.
+ */
+const IMAGE_GEN_TOOL_MODELS = new Set([
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "o3",
+  "o3-pro",
+  "o4-mini",
+]);
+
 function buildInput(
   messages: ConversationMessage[]
 ): OpenAI.Responses.ResponseInputItem[] {
@@ -30,7 +47,7 @@ export class OpenAIProvider implements AIProvider {
     if (config.enableWebSearch) {
       tools.push({ type: "web_search_preview" });
     }
-    if (config.enableImageGeneration) {
+    if (config.enableImageGeneration && IMAGE_GEN_TOOL_MODELS.has(config.modelId)) {
       tools.push({ type: "image_generation" } as OpenAI.Responses.Tool);
     }
 
