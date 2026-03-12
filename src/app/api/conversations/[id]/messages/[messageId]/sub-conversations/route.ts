@@ -71,6 +71,9 @@ export async function GET(
       conversationId: sc.conversation_id,
       parentMessageId: sc.parent_message_id,
       highlightedText: sc.highlighted_text,
+      isStarred: sc.is_starred ?? false,
+      isArchived: sc.is_archived ?? false,
+      isReported: sc.is_reported ?? false,
       createdAt: sc.created_at,
       updatedAt: sc.updated_at,
     }));

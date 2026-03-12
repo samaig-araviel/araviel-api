@@ -46,7 +46,6 @@ export async function PATCH(
       err instanceof Error && "statusCode" in err
         ? (err as Error & { statusCode: number }).statusCode
         : 500;
-    console.error("[PATCH /api/imported-conversations/:id]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: statusCode, headers: corsHeaders(origin) }
@@ -76,7 +75,6 @@ export async function DELETE(
       err instanceof Error && "statusCode" in err
         ? (err as Error & { statusCode: number }).statusCode
         : 500;
-    console.error("[DELETE /api/imported-conversations/:id]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: statusCode, headers: corsHeaders(origin) }

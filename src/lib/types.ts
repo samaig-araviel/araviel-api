@@ -200,6 +200,9 @@ export interface DBSubConversation {
   conversation_id: string;
   parent_message_id: string;
   highlighted_text: string;
+  is_starred: boolean;
+  is_archived: boolean;
+  is_reported: boolean;
   created_at: string;
   updated_at: string;
 }

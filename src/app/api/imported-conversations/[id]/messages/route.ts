@@ -25,7 +25,6 @@ export async function GET(
       err instanceof Error && "statusCode" in err
         ? (err as Error & { statusCode: number }).statusCode
         : 500;
-    console.error("[GET /api/imported-conversations/:id/messages]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: statusCode, headers: corsHeaders(origin) }

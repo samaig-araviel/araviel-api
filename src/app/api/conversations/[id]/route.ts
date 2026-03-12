@@ -16,7 +16,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("conversations")
-      .select("id, title, created_at, updated_at, project_id")
+      .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .eq("id", id)
       .single();
 
@@ -34,6 +34,9 @@ export async function GET(
         createdAt: data.created_at,
         updatedAt: data.updated_at,
         projectId: data.project_id ?? null,
+        isStarred: data.is_starred ?? false,
+        isArchived: data.is_archived ?? false,
+        isReported: data.is_reported ?? false,
       },
       { headers: corsHeaders(request.headers.get("origin")) }
     );
@@ -74,13 +77,17 @@ export async function PATCH(
       updates.title = body.title.trim() || updates.title;
     }
 
+    if (body.is_starred !== undefined) updates.is_starred = body.is_starred;
+    if (body.is_archived !== undefined) updates.is_archived = body.is_archived;
+    if (body.is_reported !== undefined) updates.is_reported = body.is_reported;
+
     const supabase = getSupabase();
 
     const { data, error } = await supabase
       .from("conversations")
       .update(updates)
       .eq("id", id)
-      .select("id, title, created_at, updated_at, project_id")
+      .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .single();
 
     if (error) {
@@ -98,6 +105,9 @@ export async function PATCH(
         createdAt: data.created_at,
         updatedAt: data.updated_at,
         projectId: data.project_id ?? null,
+        isStarred: data.is_starred ?? false,
+        isArchived: data.is_archived ?? false,
+        isReported: data.is_reported ?? false,
       },
       { headers: corsHeaders(origin) }
     );

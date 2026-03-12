@@ -102,7 +102,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("messages")
-      .select("*")
+      .select("*, message_feedback(feedback)")
       .eq("conversation_id", conversationId)
       .is("sub_conversation_id", null)
       .order("created_at", { ascending: true })
@@ -115,7 +115,16 @@ export async function GET(
       );
     }
 
-    const messages = (data as DBMessage[] ?? []).map(formatMessage);
+    const messages = (data ?? []).map((msg) => {
+      const formatted = formatMessage(msg as DBMessage);
+      const messageFeedback = (msg as Record<string, unknown>).message_feedback as
+        | { feedback: string }[]
+        | null;
+      return {
+        ...formatted,
+        feedback: messageFeedback?.[0]?.feedback ?? null,
+      };
+    });
 
     return NextResponse.json(
       { messages },

@@ -14,12 +14,14 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
     const projectId = searchParams.get("projectId");
+    const starredParam = searchParams.get("starred");
+    const archivedParam = searchParams.get("archived");
 
     const supabase = getSupabase();
 
     let dataQuery = supabase
       .from("conversations")
-      .select("id, title, created_at, updated_at, project_id")
+      .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .order("updated_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -30,6 +32,18 @@ export async function GET(request: NextRequest) {
     if (projectId) {
       dataQuery = dataQuery.eq("project_id", projectId);
       countQuery = countQuery.eq("project_id", projectId);
+    }
+
+    if (starredParam !== null) {
+      const isStarred = starredParam === "true";
+      dataQuery = dataQuery.eq("is_starred", isStarred);
+      countQuery = countQuery.eq("is_starred", isStarred);
+    }
+
+    if (archivedParam !== null) {
+      const isArchived = archivedParam === "true";
+      dataQuery = dataQuery.eq("is_archived", isArchived);
+      countQuery = countQuery.eq("is_archived", isArchived);
     }
 
     const [{ data, error }, { count, error: countError }] = await Promise.all([
@@ -50,6 +64,9 @@ export async function GET(request: NextRequest) {
       createdAt: c.created_at,
       updatedAt: c.updated_at,
       projectId: c.project_id ?? null,
+      isStarred: c.is_starred ?? false,
+      isArchived: c.is_archived ?? false,
+      isReported: c.is_reported ?? false,
     }));
 
     return NextResponse.json(
