@@ -9,6 +9,12 @@ const THINKING_MODELS = new Set([
   "claude-opus-4-5-20251101",
 ]);
 
+/** Models that support adaptive thinking (recommended over manual budget_tokens). */
+const ADAPTIVE_THINKING_MODELS = new Set([
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+]);
+
 function buildMessages(
   messages: ConversationMessage[]
 ): Anthropic.MessageParam[] {
@@ -50,7 +56,9 @@ export class AnthropicProvider implements AIProvider {
       stream: true,
       ...(tools.length > 0 ? { tools } : {}),
       ...(useThinking
-        ? { thinking: { type: "enabled", budget_tokens: 10000 } }
+        ? ADAPTIVE_THINKING_MODELS.has(config.modelId)
+          ? { thinking: { type: "adaptive" as const } }
+          : { thinking: { type: "enabled" as const, budget_tokens: 10000 } }
         : {}),
     };
 

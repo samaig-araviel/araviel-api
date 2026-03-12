@@ -2,23 +2,30 @@ import OpenAI from "openai";
 import type { AIProvider, ProviderConfig, ProviderStreamEvent } from "./base";
 import type { Citation, ConversationMessage, TokenUsage } from "@/lib/types";
 
-const REASONING_MODELS = new Set(["o3", "o3-pro", "o4-mini"]);
-
 /**
  * Models that support the `image_generation` tool in the Responses API.
- * Per OpenAI docs, this tool is available for GPT-4o series, GPT-4.1 series,
- * and o-series models. For other models, image generation should be routed
- * to a dedicated image model instead.
+ * Per OpenAI docs (March 2026), this tool is available for GPT-4o series,
+ * GPT-4.1 series, GPT-5 series, and o3 (only o3 from the o-series; o3-pro
+ * and o4-mini do NOT support image_generation).
+ * For other models, image generation should be routed to a dedicated image model.
  */
 const IMAGE_GEN_TOOL_MODELS = new Set([
+  // GPT-4o series
   "gpt-4o",
   "gpt-4o-mini",
+  // GPT-4.1 series
   "gpt-4.1",
   "gpt-4.1-mini",
   "gpt-4.1-nano",
+  // GPT-5 series
+  "gpt-5",
+  "gpt-5.2",
+  "gpt-5.4",
+  "gpt-5.4-pro",
+  "gpt-5-mini",
+  "gpt-5-nano",
+  // o-series (only o3 supports image_generation)
   "o3",
-  "o3-pro",
-  "o4-mini",
 ]);
 
 function buildInput(
@@ -41,8 +48,6 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async *stream(config: ProviderConfig): AsyncGenerator<ProviderStreamEvent> {
-    const isReasoning = REASONING_MODELS.has(config.modelId);
-
     const tools: OpenAI.Responses.Tool[] = [];
     if (config.enableWebSearch) {
       tools.push({ type: "web_search_preview" });
@@ -54,9 +59,9 @@ export class OpenAIProvider implements AIProvider {
     const params: OpenAI.Responses.ResponseCreateParamsStreaming = {
       model: config.modelId,
       input: buildInput(config.messages),
+      instructions: config.systemPrompt,
       stream: true,
       ...(tools.length > 0 ? { tools } : {}),
-      ...(!isReasoning ? { instructions: config.systemPrompt } : {}),
     };
 
     const stream = await this.client.responses.create(params);
