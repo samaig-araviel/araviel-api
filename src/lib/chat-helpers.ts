@@ -428,7 +428,6 @@ const NATIVE_IMAGE_GEN_MODELS = new Set([
   "gpt-5.2",
   "gpt-5.4",
   "gpt-5.4-pro",
-  "gpt-5-mini",
   "gpt-5-nano",
   "o3",
   // Google — responseModalities (only -image model variants)
