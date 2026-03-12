@@ -296,11 +296,8 @@ async function handleChat(
           },
         });
 
+        // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
         const markdownContent = `![Generated image](${imageResult.url})`;
-        await sendSSE(writer, encoder, {
-          type: "delta",
-          data: { content: markdownContent },
-        });
 
         const imageStreamResult: StreamResult = {
           success: true,
@@ -373,11 +370,8 @@ async function handleChat(
               },
             });
 
+            // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
             const markdownContent = `![Generated image](${backupImageResult.url})`;
-            await sendSSE(writer, encoder, {
-              type: "delta",
-              data: { content: markdownContent },
-            });
 
             const backupStreamResult: StreamResult = {
               success: true,
@@ -471,11 +465,8 @@ async function handleChat(
               },
             });
 
+            // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
             const markdownContent = `![Generated image](${imageResult.url})`;
-            await sendSSE(writer, encoder, {
-              type: "delta",
-              data: { content: markdownContent },
-            });
 
             const imageStreamResult: StreamResult = {
               success: true,
