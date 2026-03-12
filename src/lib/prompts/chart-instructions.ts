@@ -53,6 +53,9 @@ const VALUE_FORMAT_OPTIONS = [
 ].join("\n");
 
 const CHART_RULES = [
+  "IMPORTANT: Always lead with a thorough, well-written text analysis first. Charts are supplementary visual aids, not the primary response.",
+  "Only include a chart when the data genuinely benefits from visualization — do not default to charts for every question.",
+  "Place charts AFTER your text analysis, not before it. The text should be the core of the response.",
   "Always include real or representative data — never generate an empty chart.",
   "Use area with gradientFill: true as the default for single-series financial time data (stock prices, index performance).",
   "Use composed when showing price + volume together (volume as bar, price as line).",
@@ -63,8 +66,7 @@ const CHART_RULES = [
   "Keep data arrays reasonable (10–60 data points for time series, 3–10 for categorical).",
   "Use reference lines for targets, averages, or thresholds (e.g., 52-week high/low, moving averages).",
   "You can include multiple charts in a single response by using multiple chart blocks.",
-  "Always accompany the chart with brief text analysis — never show a chart alone without context.",
-  "The chart renders inline in the message — present it naturally as part of your response.",
+  "The chart renders inline in the message — present it naturally at the end of your analysis.",
 ].join("\n");
 
 const COLOR_SUGGESTIONS = [
@@ -82,7 +84,7 @@ export function getChartInstructions(): string {
   return [
     "## Data Visualization",
     "",
-    "When the user asks about financial data, stock analysis, comparisons, trends, portfolio allocation, or any question that would benefit from a visual chart, you MUST generate an inline chart using a ```chart code block containing valid JSON.",
+    "When the user asks about financial data, stock analysis, comparisons, trends, portfolio allocation, or any question that would benefit from a visual chart, you may optionally include an inline chart using a ```chart code block containing valid JSON. Always prioritize a comprehensive, well-structured text response first. Charts should complement your analysis, placed after the text, and only when visualization adds genuine value.",
     "",
     "### Chart JSON Schema",
     "",

@@ -456,6 +456,7 @@ export function buildSystemPrompt(projectInstructions?: string): string {
     "Provide clear, accurate, and well-structured responses.",
     "When appropriate, use markdown formatting for better readability.",
     "Be concise but thorough. If you are unsure about something, say so.",
+    "Do not use emojis in your responses. Keep your tone professional and clean.",
   ].join(" ");
 
   let prompt = `${basePrompt}\n\n${getChartInstructions()}`;
