@@ -799,7 +799,7 @@ async function tryDedicatedImageFallback(
         },
       });
 
-      const markdownContent = `![Generated image](${imageResult.url})\n\n*${imgModel.name} — "${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}"*`;
+      const markdownContent = `![Generated image: ${prompt.slice(0, 100)}](${imageResult.url})\n\n*${imgModel.name} — "${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}"*`;
       return {
         success: true,
         content: markdownContent,
@@ -957,7 +957,7 @@ async function streamFromProvider(
                 provider: model.provider,
               },
             });
-            content += `\n![Generated image](${event.imageUrl})\n`;
+            content += `\n![Generated image: ${userPrompt.slice(0, 100)}](${event.imageUrl})\n`;
           }
           break;
         case "tool_use":
