@@ -20,6 +20,7 @@ import {
   getPreviousModelId,
   resolveModel,
   buildSystemPrompt,
+  detectFileIntent,
   getProjectInstructionsForConversation,
   resolveWebSearch,
   shouldEnableThinking,
@@ -266,7 +267,8 @@ async function handleChat(
     const enableImageGeneration =
       adeResponse.analysis.intent === "image_generation" || chatReq.modality === "image";
 
-    const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined);
+    const includeFileInstructions = detectFileIntent(chatReq.message);
+    const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions });
     const enableWebSearch = shouldUseWebSearch;
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 

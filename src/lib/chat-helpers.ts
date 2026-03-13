@@ -469,7 +469,7 @@ export function getImageCapableModels(): {
   };
 }
 
-export function buildSystemPrompt(projectInstructions?: string): string {
+export function buildSystemPrompt(projectInstructions?: string, options?: { includeFileInstructions?: boolean }): string {
   const basePrompt = [
     "You are a helpful AI assistant powered by Araviel, an intelligent AI platform.",
     "Provide clear, accurate, and well-structured responses.",
@@ -481,7 +481,9 @@ export function buildSystemPrompt(projectInstructions?: string): string {
 
   prompt += `\n\n${getRichBlockInstructions()}`;
 
-  prompt += `\n\n${getFileBlockInstructions()}`;
+  if (options?.includeFileInstructions) {
+    prompt += `\n\n${getFileBlockInstructions()}`;
+  }
 
   prompt += `\n\n${getFollowUpInstructions()}`;
 
@@ -847,6 +849,13 @@ function detectWebSearchFromIntent(analysis: ADEResponse["analysis"]): boolean {
 
 export function shouldEnableThinking(analysis: ADEResponse["analysis"]): boolean {
   return analysis.complexity === "demanding";
+}
+
+/** Fast keyword check to detect if user is requesting a file download/export. */
+const FILE_INTENT_PATTERNS = /\b(download\s+as|export\s+(?:to|as|it)|save\s+(?:as|to|this)|give\s+me\s+(?:a|the)\s+(?:pdf|docx?|xlsx?|csv|pptx?|word|excel|powerpoint|spreadsheet|presentation|text\s+file)|create\s+(?:a|the)\s+(?:pdf|docx?|xlsx?|csv|pptx?|word|excel|powerpoint|spreadsheet|presentation)|generate\s+(?:a|the)\s+(?:file|pdf|docx?|xlsx?|csv|pptx?|word|excel|powerpoint|spreadsheet|presentation)|as\s+(?:a\s+)?(?:pdf|docx?|xlsx?|csv|pptx?)\b|\.pdf\b|\.docx?\b|\.xlsx?\b|\.csv\b|\.pptx?\b|i\s+need\s+(?:a|the)\s+(?:pdf|word|excel|spreadsheet|powerpoint|presentation|file)|convert\s+(?:to|this|it)\s+(?:to\s+)?(?:pdf|word|excel|csv|powerpoint)|make\s+(?:a|me\s+a)\s+(?:pdf|word|excel|spreadsheet|csv|powerpoint|presentation))\b/i;
+
+export function detectFileIntent(message: string): boolean {
+  return FILE_INTENT_PATTERNS.test(message);
 }
 
 export function findSupportedBackup(
