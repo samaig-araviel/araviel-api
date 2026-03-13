@@ -28,13 +28,16 @@ export async function generateStabilityImage(
     throw new Error(`Stability API error (${response.status}): ${errText}`);
   }
 
-  const json = (await response.json()) as { image?: string };
-  if (!json.image) {
+  const json = (await response.json()) as { image?: string; artifacts?: Array<{ base64?: string }> };
+
+  // v2beta returns { image: "<base64>" }; older endpoints used { artifacts: [{ base64 }] }
+  const b64 = json.image ?? json.artifacts?.[0]?.base64;
+  if (!b64) {
     throw new Error("Stability API returned no image data");
   }
 
   return {
-    url: `data:image/png;base64,${json.image}`,
+    url: `data:image/png;base64,${b64}`,
     size: "1024x1024",
   };
 }

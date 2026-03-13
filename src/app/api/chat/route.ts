@@ -189,8 +189,8 @@ async function handleChat(
     });
 
     // 7. Check for fallback (unsupported task)
-    if (adeResponse.fallback && !adeResponse.fallback.supported === false) {
-      // fallback.supported === false means ADE couldn't find a model
+    if (adeResponse.fallback && adeResponse.fallback.supported === false) {
+      // ADE couldn't find a model — fall through to send the fallback message
     }
     if (adeResponse.fallback && adeResponse.fallback.message) {
       await sendSSE(writer, encoder, {
@@ -297,7 +297,7 @@ async function handleChat(
         });
 
         // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-        const markdownContent = `![Generated image](${imageResult.url})`;
+        const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${imageResult.url})`;
 
         const imageStreamResult: StreamResult = {
           success: true,
@@ -371,7 +371,7 @@ async function handleChat(
             });
 
             // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-            const markdownContent = `![Generated image](${backupImageResult.url})`;
+            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${backupImageResult.url})`;
 
             const backupStreamResult: StreamResult = {
               success: true,
@@ -466,7 +466,7 @@ async function handleChat(
             });
 
             // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-            const markdownContent = `![Generated image](${imageResult.url})`;
+            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${imageResult.url})`;
 
             const imageStreamResult: StreamResult = {
               success: true,
@@ -733,12 +733,20 @@ interface ApiCallLogEntry {
   errorMessage?: string;
 }
 
-/** Default dedicated image model used as a last-resort fallback when chat models can't generate images. */
-const FALLBACK_IMAGE_MODEL = { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "openai" };
+/**
+ * Ordered list of dedicated image models to try as last-resort fallback.
+ * Each entry is tried in order; models whose provider API key is missing are skipped.
+ */
+const FALLBACK_IMAGE_MODELS = [
+  { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "openai", envKey: "OPENAI_API_KEY" },
+  { id: "dall-e-3", name: "DALL-E 3", provider: "openai", envKey: "OPENAI_API_KEY" },
+  { id: "imagen-4", name: "Imagen 4", provider: "google", envKey: "GOOGLE_API_KEY" },
+  { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "stability", envKey: "STABILITY_API_KEY" },
+];
 
 /**
- * Last-resort fallback: generate an image using a dedicated image model when
- * the selected chat model doesn't support native image generation.
+ * Last-resort fallback: try each dedicated image model in FALLBACK_IMAGE_MODELS
+ * until one succeeds. Skips models whose API key is not configured.
  */
 async function tryDedicatedImageFallback(
   prompt: string,
@@ -747,61 +755,69 @@ async function tryDedicatedImageFallback(
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder
 ): Promise<StreamResult | null> {
-  const imgModel = FALLBACK_IMAGE_MODEL;
-  const start = Date.now();
+  for (const imgModel of FALLBACK_IMAGE_MODELS) {
+    // Skip models whose API key is not configured
+    if (!process.env[imgModel.envKey]) continue;
 
-  try {
-    await sendSSE(writer, encoder, {
-      type: "error",
-      data: {
-        message: `${originalModel.name} cannot generate images. Using ${imgModel.name} instead...`,
-        code: "PROVIDER_RETRY",
-      },
-    });
+    // Skip the model that already failed as primary (avoid double-trying)
+    if (imgModel.id === originalModel.id) continue;
 
-    const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt);
-    const latencyMs = Date.now() - start;
+    const start = Date.now();
+    try {
+      await sendSSE(writer, encoder, {
+        type: "error",
+        data: {
+          message: `${originalModel.name} cannot generate images. Using ${imgModel.name} instead...`,
+          code: "PROVIDER_RETRY",
+        },
+      });
 
-    apiCallLogs.push({
-      provider: imgModel.provider,
-      modelId: imgModel.id,
-      statusCode: 200,
-      latencyMs,
-    });
+      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt);
+      const latencyMs = Date.now() - start;
 
-    await sendSSE(writer, encoder, {
-      type: "image_generation",
-      data: {
-        url: imageResult.url,
-        prompt,
-        model: imgModel.name,
+      apiCallLogs.push({
         provider: imgModel.provider,
-        size: imageResult.size ?? "1024x1024",
-        style: imageResult.style ?? null,
-      },
-    });
+        modelId: imgModel.id,
+        statusCode: 200,
+        latencyMs,
+      });
 
-    const markdownContent = `![Generated image](${imageResult.url})`;
-    return {
-      success: true,
-      content: markdownContent,
-      thinkingContent: "",
-      citations: [],
-      usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
-      latencyMs,
-      webSearchUsed: false,
-    };
-  } catch (err) {
-    const latencyMs = Date.now() - start;
-    apiCallLogs.push({
-      provider: imgModel.provider,
-      modelId: imgModel.id,
-      statusCode: 500,
-      latencyMs,
-      errorMessage: err instanceof Error ? err.message : "Dedicated image fallback failed",
-    });
-    return null;
+      await sendSSE(writer, encoder, {
+        type: "image_generation",
+        data: {
+          url: imageResult.url,
+          prompt,
+          model: imgModel.name,
+          provider: imgModel.provider,
+          size: imageResult.size ?? "1024x1024",
+          style: imageResult.style ?? null,
+        },
+      });
+
+      const markdownContent = `![Generated image](${imageResult.url})\n\n*${imgModel.name} — "${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}"*`;
+      return {
+        success: true,
+        content: markdownContent,
+        thinkingContent: "",
+        citations: [],
+        usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+        latencyMs,
+        webSearchUsed: false,
+      };
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      apiCallLogs.push({
+        provider: imgModel.provider,
+        modelId: imgModel.id,
+        statusCode: 500,
+        latencyMs,
+        errorMessage: err instanceof Error ? err.message : "Dedicated image fallback failed",
+      });
+      // Continue to next fallback model
+    }
   }
+
+  return null;
 }
 
 async function streamFromProvider(
