@@ -1066,6 +1066,12 @@ async function finalize(
   if (result.citations.length > 0) {
     extendedData.citations = result.citations;
   }
+  if (result.meta?.followUps && result.meta.followUps.length > 0) {
+    extendedData.followUps = result.meta.followUps;
+  }
+  if (result.meta?.questions && result.meta.questions.length > 0) {
+    extendedData.questions = result.meta.questions;
+  }
 
   // Insert assistant message only now that we have content
   await insertAssistantMessage(messageId, conversationId, {
