@@ -27,11 +27,18 @@ export function extractAravielMeta(content: string): {
   }
 
   const jsonStr = content.slice(openIdx + META_OPEN.length, closeIdx).trim();
-  const cleanContent = content.slice(0, openIdx).trimEnd();
+  let cleanContent = content.slice(0, openIdx).trimEnd();
 
   try {
     const parsed = JSON.parse(jsonStr);
     const meta = validateMeta(parsed);
+
+    // Safety net: if the AI included questions in the metadata, strip any trailing
+    // question block from the visible response (e.g. "Would you like me to:\n- option A\n- option B")
+    if (meta && meta.questions.length > 0) {
+      cleanContent = stripTrailingQuestions(cleanContent);
+    }
+
     return { cleanContent, meta };
   } catch {
     return { cleanContent, meta: null };
@@ -79,6 +86,39 @@ function validateQuestions(raw: unknown): FollowUpQuestion[] {
         .map((s) => s.trim()),
     }))
     .filter((q) => q.options.length > 0);
+}
+
+/**
+ * Strip trailing question/choice blocks that the AI may have included in the visible
+ * response despite instructions not to. Handles patterns like:
+ * - "Would you like me to:\n- option A\n- option B\n- option C"
+ * - "Do you prefer:\n1. X\n2. Y\n3. Z"
+ * - "Which would you like?\n* A\n* B"
+ * - "Let me know if you'd like to:\n- ..."
+ *
+ * Only strips from the END of the content to avoid removing legitimate inline lists.
+ */
+function stripTrailingQuestions(content: string): string {
+  // Pattern: a question lead-in line followed by a bullet/numbered list at the very end.
+  // The lead-in contains phrases like "would you like", "do you want", "do you prefer",
+  // "which would you", "let me know", "shall I", "should I", etc.
+  const trailingQuestionPattern =
+    /\n{0,3}(?:would you like(?: me to| to)?|do you (?:want|prefer)|which (?:would you|do you|one)|let me know (?:if|which|what|whether)|shall I|should I|here are (?:some|a few|your) (?:options|choices)|I can (?:also|either))[^\n]*:\s*\n(?:\s*[-*•]\s+.+\n?){1,5}\s*$/i;
+
+  const stripped = content.replace(trailingQuestionPattern, "").trimEnd();
+
+  // Also handle numbered list variants (1. / 2. / 3.)
+  const numberedVariant =
+    /\n{0,3}(?:would you like(?: me to| to)?|do you (?:want|prefer)|which (?:would you|do you|one)|let me know (?:if|which|what|whether)|shall I|should I|here are (?:some|a few|your) (?:options|choices)|I can (?:also|either))[^\n]*:\s*\n(?:\s*\d+[.)]\s+.+\n?){1,5}\s*$/i;
+
+  const result = stripped.replace(numberedVariant, "").trimEnd();
+
+  // Also strip a trailing standalone question line that just asks "Would you like me to..." with options
+  // but formatted as "(a) X, (b) Y, (c) Z" inline
+  const inlineOptions =
+    /\n{0,3}(?:would you like(?: me to| to)?|do you (?:want|prefer)|which (?:would you|do you|one)|shall I|should I)[^\n]*\?\s*$/i;
+
+  return result.replace(inlineOptions, "").trimEnd();
 }
 
 /**

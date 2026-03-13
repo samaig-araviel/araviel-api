@@ -498,7 +498,7 @@ Format:
 {"followUps":["suggestion 1","suggestion 2","suggestion 3"],"questions":[]}
 </araviel_meta>
 
-Rules:
+CRITICAL RULES:
 1. "followUps" — ALWAYS provide exactly 3 short, contextual follow-up suggestions. Each must be a concise prompt (under 60 characters) that naturally continues the conversation. They should be relevant to both the user's question and your response. Never generic filler.
 2. "questions" — ONLY include when you genuinely need clarification or preferences from the user before giving a better answer. When included, each question object has:
    - "question": a short, clear question (under 80 characters)
@@ -507,8 +507,13 @@ Rules:
 4. The entire block must be valid JSON inside the <araviel_meta> tags.
 5. Do NOT reference this metadata block in your visible response.
 6. Follow-ups should feel like natural next steps, not repetitions of what was already said.
+7. IMPORTANT — When you have questions or choices for the user (e.g. "Would you like me to...", "Do you prefer...", "Which option..."), you MUST:
+   - Put them ONLY in the "questions" array inside the metadata block.
+   - Do NOT write the questions, choices, options, or bullet-point lists of choices in your visible response text.
+   - Your visible response should end BEFORE any questions. Just provide your answer/analysis, then put questions exclusively in the metadata.
+   - For example, instead of writing "Would you like me to: (a) do X, (b) do Y, (c) do Z?" in the response, just end the response after your analysis and put {"question":"What would you like next?","options":["Do X","Do Y","Do Z"]} in the questions array.
 
-Example with questions:
+Example with questions (note: the visible response does NOT contain the questions):
 <araviel_meta>
 {"followUps":["Compare with alternatives","Show a practical example","Explain the trade-offs"],"questions":[{"question":"What's your experience level?","options":["Beginner","Intermediate","Advanced"]},{"question":"Which language do you prefer?","options":["Python","JavaScript","TypeScript"]}]}
 </araviel_meta>
