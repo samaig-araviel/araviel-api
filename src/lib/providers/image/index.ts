@@ -8,9 +8,6 @@ export interface ImageGenResult {
   style?: string;
 }
 
-/** Maximum prompt length sent to image generation APIs. */
-const MAX_PROMPT_LENGTH = 4000;
-
 /**
  * Generate an image using a dedicated image generation model.
  * Routes to the correct provider-specific implementation based on provider name.
@@ -24,15 +21,15 @@ export async function generateImage(
     throw new Error("Image generation prompt must be a non-empty string");
   }
 
-  const sanitizedPrompt = prompt.trim().slice(0, MAX_PROMPT_LENGTH);
+  const trimmedPrompt = prompt.trim();
 
   switch (provider) {
     case "openai":
-      return generateOpenAIImage(modelId, sanitizedPrompt);
+      return generateOpenAIImage(modelId, trimmedPrompt);
     case "google":
-      return generateGoogleImage(modelId, sanitizedPrompt);
+      return generateGoogleImage(modelId, trimmedPrompt);
     case "stability":
-      return generateStabilityImage(sanitizedPrompt);
+      return generateStabilityImage(trimmedPrompt);
     default:
       throw new Error(`No image generation support for provider: ${provider}`);
   }
