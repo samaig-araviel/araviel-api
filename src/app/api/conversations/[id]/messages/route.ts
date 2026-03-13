@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
-import type { DBMessage, Citation, ModelInfo } from "@/lib/types";
+import type { DBMessage, Citation, ModelInfo, FollowUpQuestion } from "@/lib/types";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
 
 interface FormattedMessage {
@@ -23,6 +23,8 @@ interface FormattedMessage {
   costUsd?: number | null;
   latencyMs?: number | null;
   adeLatencyMs?: number | null;
+  followUps?: string[] | null;
+  questions?: FollowUpQuestion[] | null;
 }
 
 function formatMessage(msg: DBMessage): FormattedMessage {
@@ -47,6 +49,8 @@ function formatMessage(msg: DBMessage): FormattedMessage {
   const extendedData = msg.extended_data as {
     thinkingContent?: string;
     citations?: Citation[];
+    followUps?: string[];
+    questions?: FollowUpQuestion[];
   } | null;
 
   return {
@@ -67,6 +71,8 @@ function formatMessage(msg: DBMessage): FormattedMessage {
     costUsd: msg.cost_usd,
     latencyMs: msg.latency_ms,
     adeLatencyMs: msg.ade_latency_ms,
+    followUps: extendedData?.followUps ?? null,
+    questions: extendedData?.questions ?? null,
   };
 }
 
