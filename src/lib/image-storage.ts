@@ -38,7 +38,7 @@ export async function uploadImageToStorage(opts: {
   let mimeType = "image/png";
 
   if (opts.imageDataUrl.startsWith("data:")) {
-    const match = opts.imageDataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+    const match = opts.imageDataUrl.match(/^data:([^;]+);base64,([\s\S]+)$/);
     if (!match) throw new Error("Invalid image data URI");
     mimeType = match[1];
     buffer = Buffer.from(match[2], "base64");
