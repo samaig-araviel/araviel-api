@@ -480,11 +480,43 @@ export function buildSystemPrompt(projectInstructions?: string): string {
 
   let prompt = `${basePrompt}\n\n${getChartInstructions()}`;
 
+  prompt += `\n\n${getFollowUpInstructions()}`;
+
   if (projectInstructions && projectInstructions.trim()) {
     prompt += `\n\n--- Project Instructions ---\nThe following instructions were set by the user for this project. Follow them for all responses in this conversation:\n\n${projectInstructions}`;
   }
 
   return prompt;
+}
+
+function getFollowUpInstructions(): string {
+  return `--- Follow-Up & Questions ---
+At the very end of EVERY response, you MUST append a metadata block. This block will be parsed and stripped — the user will never see it. It must be the absolute last thing in your response.
+
+Format:
+<araviel_meta>
+{"followUps":["suggestion 1","suggestion 2","suggestion 3"],"questions":[]}
+</araviel_meta>
+
+Rules:
+1. "followUps" — ALWAYS provide exactly 3 short, contextual follow-up suggestions. Each must be a concise prompt (under 60 characters) that naturally continues the conversation. They should be relevant to both the user's question and your response. Never generic filler.
+2. "questions" — ONLY include when you genuinely need clarification or preferences from the user before giving a better answer. When included, each question object has:
+   - "question": a short, clear question (under 80 characters)
+   - "options": exactly 3 short option strings (under 40 characters each) representing the most likely answers
+3. If you do not need to ask questions, set "questions" to an empty array [].
+4. The entire block must be valid JSON inside the <araviel_meta> tags.
+5. Do NOT reference this metadata block in your visible response.
+6. Follow-ups should feel like natural next steps, not repetitions of what was already said.
+
+Example with questions:
+<araviel_meta>
+{"followUps":["Compare with alternatives","Show a practical example","Explain the trade-offs"],"questions":[{"question":"What's your experience level?","options":["Beginner","Intermediate","Advanced"]},{"question":"Which language do you prefer?","options":["Python","JavaScript","TypeScript"]}]}
+</araviel_meta>
+
+Example without questions:
+<araviel_meta>
+{"followUps":["Dive deeper into performance","See real-world use cases","Explore related patterns"],"questions":[]}
+</araviel_meta>`;
 }
 
 export async function getProjectInstructionsForConversation(

@@ -132,8 +132,23 @@ export type SSEEventType =
   | "citations"
   | "tool_use"
   | "image_generation"
+  | "followups"
+  | "questions"
   | "done"
   | "error";
+
+export interface FollowUpQuestion {
+  question: string;
+  options: string[];
+}
+
+export interface SSEFollowUpsData {
+  suggestions: string[];
+}
+
+export interface SSEQuestionsData {
+  questions: FollowUpQuestion[];
+}
 
 export interface SSERoutingData {
   conversationId: string;
