@@ -481,6 +481,8 @@ export function buildSystemPrompt(projectInstructions?: string): string {
 
   prompt += `\n\n${getRichBlockInstructions()}`;
 
+  prompt += `\n\n${getFileBlockInstructions()}`;
+
   prompt += `\n\n${getFollowUpInstructions()}`;
 
   if (projectInstructions && projectInstructions.trim()) {
@@ -614,6 +616,139 @@ Rules:
 - Use \`\`\`steps instead of a numbered list when giving procedural instructions with explanations per step.
 - For simple lists (under 5 items, no extra detail needed), prefer standard markdown lists.
 - Always place rich blocks AFTER your text analysis, not as a replacement for it.`;
+}
+
+function getFileBlockInstructions(): string {
+  return `## File Downloads
+
+When the user asks you to generate a downloadable file (e.g., "give me this as a PDF", "export to Excel", "create a Word document", "download as CSV"), you MUST emit a \`\`\`file code block containing a JSON specification. The frontend will generate the actual file client-side and display a download card.
+
+IMPORTANT: Only emit a \`\`\`file block when the user explicitly requests a file download or export. Do NOT proactively generate files.
+
+### Supported Formats
+pdf, docx, xlsx, pptx, csv, txt, json, html, md, xml, sql, yaml
+
+### JSON Spec Format
+
+Every file block MUST contain valid JSON with these fields:
+- "filename" (required): Full filename with extension (e.g., "report.pdf", "data.xlsx")
+- "format" (required): One of the supported format strings above
+- "title" (optional): Human-readable title for the document
+- "subtitle" (optional): Secondary description
+- "content" (required): Format-specific content structure (see below)
+
+### Document Formats (PDF, DOCX, TXT, HTML, MD)
+
+Use a "sections" array for structured documents:
+
+\`\`\`file
+{
+  "filename": "market-analysis.pdf",
+  "format": "pdf",
+  "title": "Q4 Market Analysis Report",
+  "subtitle": "Prepared by Araviel AI",
+  "content": {
+    "sections": [
+      {"type": "heading", "text": "Executive Summary", "level": 1},
+      {"type": "paragraph", "text": "This report provides a comprehensive analysis of Q4 market trends..."},
+      {"type": "heading", "text": "Key Metrics", "level": 2},
+      {"type": "table", "headers": ["Metric", "Q3", "Q4", "Change"], "rows": [["Revenue", "$1.2M", "$1.5M", "+25%"], ["Users", "5,000", "8,200", "+64%"]]},
+      {"type": "heading", "text": "Recommendations", "level": 2},
+      {"type": "list", "items": ["Expand into emerging markets", "Increase marketing spend by 15%", "Launch mobile app by Q2"], "ordered": true},
+      {"type": "code", "text": "SELECT SUM(revenue) FROM sales WHERE quarter = 'Q4'", "language": "sql"},
+      {"type": "divider"},
+      {"type": "paragraph", "text": "For questions, contact the analytics team."}
+    ]
+  }
+}
+\`\`\`
+
+Section types: "heading" (with level 1-3), "paragraph", "table" (with headers + rows), "list" (with items + ordered boolean), "code" (with text + optional language), "divider".
+
+### Spreadsheet Formats (XLSX, CSV)
+
+Use "sheets" array (XLSX can have multiple sheets; CSV uses first sheet only):
+
+\`\`\`file
+{
+  "filename": "sales-data.xlsx",
+  "format": "xlsx",
+  "title": "Sales Report",
+  "content": {
+    "sheets": [
+      {
+        "name": "Revenue",
+        "headers": ["Month", "Product", "Revenue", "Units Sold"],
+        "rows": [
+          ["January", "Widget A", 45000, 1200],
+          ["January", "Widget B", 32000, 800],
+          ["February", "Widget A", 52000, 1400]
+        ]
+      },
+      {
+        "name": "Summary",
+        "headers": ["Quarter", "Total Revenue", "Growth"],
+        "rows": [["Q1", 250000, "12%"], ["Q2", 310000, "24%"]]
+      }
+    ]
+  }
+}
+\`\`\`
+
+### Presentation Format (PPTX)
+
+Use "slides" array:
+
+\`\`\`file
+{
+  "filename": "project-update.pptx",
+  "format": "pptx",
+  "title": "Project Status Update",
+  "content": {
+    "slides": [
+      {"title": "Project Alpha - Status Update", "content": "Q4 2024 Review"},
+      {"title": "Key Achievements", "content": ["Launched v2.0 to production", "Onboarded 500 new enterprise users", "Reduced infrastructure costs by 30%"]},
+      {"title": "Financial Overview", "table": {"headers": ["Metric", "Target", "Actual"], "rows": [["Revenue", "$2M", "$2.3M"], ["Costs", "$800K", "$720K"]]}},
+      {"title": "Next Steps", "content": ["Hire 3 additional engineers", "Launch mobile app beta", "Expand to EU market"], "notes": "Discuss timeline with stakeholders"}
+    ]
+  }
+}
+\`\`\`
+
+Slide content can be: a string (displayed as body text), an array of strings (rendered as bullet points), or omitted if a table is provided. Optional "notes" field adds speaker notes. Optional "table" with headers + rows renders a table on the slide.
+
+### Code/Data Formats (JSON, XML, SQL, YAML)
+
+Use raw string content:
+
+\`\`\`file
+{
+  "filename": "schema.sql",
+  "format": "sql",
+  "content": "CREATE TABLE users (\\n  id SERIAL PRIMARY KEY,\\n  email VARCHAR(255) UNIQUE NOT NULL,\\n  created_at TIMESTAMP DEFAULT NOW()\\n);"
+}
+\`\`\`
+
+For JSON format, "content" can be an object/array and will be pretty-printed:
+
+\`\`\`file
+{
+  "filename": "config.json",
+  "format": "json",
+  "content": {"data": [{"id": 1, "name": "Example"}]}
+}
+\`\`\`
+
+### Rules
+1. ONLY generate a file block when the user explicitly requests a downloadable file or export.
+2. Always provide your normal text response BEFORE the file block — explain what the file contains.
+3. The filename must have the correct extension matching the format.
+4. For document formats (pdf, docx), use the sections structure for rich formatting — do NOT pass raw text when sections would be more appropriate.
+5. For spreadsheets, always include headers.
+6. Keep data realistic and consistent with your response text.
+7. You can include multiple file blocks in one response if the user asks for multiple formats.
+8. Common triggers: "download as...", "export to...", "give me a PDF of...", "create a spreadsheet with...", "save this as...", "generate a file...", "I need a Word doc...".
+9. If the user asks for a format not in the supported list, use the closest match (e.g., .doc → docx, .xls → xlsx) and mention it.`;
 }
 
 function getFollowUpInstructions(): string {
