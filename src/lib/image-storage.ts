@@ -3,20 +3,16 @@ import { randomUUID } from "crypto";
 
 const BUCKET = "generated-images";
 
-interface StoredImage {
+interface UploadResult {
   id: string;
   publicUrl: string;
   storagePath: string;
 }
 
-/**
- * Upload an image (base64 data URI or raw base64) to Supabase Storage
- * and insert a row into the generated_images table.
- *
- * Returns the public URL that replaces the base64 data URI everywhere.
- */
-export async function uploadGeneratedImage(opts: {
-  imageDataUrl: string;
+interface ImageMetadata {
+  id: string;
+  storagePath: string;
+  publicUrl: string;
   conversationId: string;
   messageId: string;
   prompt: string;
@@ -24,7 +20,16 @@ export async function uploadGeneratedImage(opts: {
   provider: string;
   size?: string;
   style?: string;
-}): Promise<StoredImage> {
+}
+
+/**
+ * Upload an image to Supabase Storage only (no database row).
+ * Call saveImageMetadata() separately after the message row exists in the DB.
+ */
+export async function uploadImageToStorage(opts: {
+  imageDataUrl: string;
+  conversationId: string;
+}): Promise<UploadResult> {
   const supabase = getSupabase();
   const id = `img-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
@@ -33,7 +38,7 @@ export async function uploadGeneratedImage(opts: {
   let mimeType = "image/png";
 
   if (opts.imageDataUrl.startsWith("data:")) {
-    const match = opts.imageDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    const match = opts.imageDataUrl.match(/^data:([^;]+);base64,(.+)$/s);
     if (!match) throw new Error("Invalid image data URI");
     mimeType = match[1];
     buffer = Buffer.from(match[2], "base64");
@@ -47,6 +52,12 @@ export async function uploadGeneratedImage(opts: {
   } else {
     // Raw base64 string
     buffer = Buffer.from(opts.imageDataUrl, "base64");
+  }
+
+  // Check size — Supabase bucket limit is 10MB
+  const sizeMB = buffer.length / (1024 * 1024);
+  if (sizeMB > 10) {
+    throw new Error(`Image too large (${sizeMB.toFixed(1)}MB) — max 10MB`);
   }
 
   const ext = mimeType.includes("webp") ? "webp" : mimeType.includes("jpeg") ? "jpg" : "png";
@@ -69,29 +80,34 @@ export async function uploadGeneratedImage(opts: {
     .from(BUCKET)
     .getPublicUrl(storagePath);
 
-  const publicUrl = urlData.publicUrl;
+  return { id, publicUrl: urlData.publicUrl, storagePath };
+}
 
-  // Insert metadata row
+/**
+ * Insert the image metadata row into the generated_images table.
+ * Must be called AFTER the message row exists (to satisfy FK on message_id).
+ */
+export async function saveImageMetadata(meta: ImageMetadata): Promise<void> {
+  const supabase = getSupabase();
+
   const { error: dbError } = await supabase.from("generated_images").insert({
-    id,
-    conversation_id: opts.conversationId,
-    message_id: opts.messageId,
-    storage_path: storagePath,
-    public_url: publicUrl,
-    prompt: opts.prompt?.slice(0, 500) || null,
-    model: opts.model || null,
-    provider: opts.provider || null,
-    size: opts.size || null,
-    style: opts.style || null,
+    id: meta.id,
+    conversation_id: meta.conversationId,
+    message_id: meta.messageId,
+    storage_path: meta.storagePath,
+    public_url: meta.publicUrl,
+    prompt: meta.prompt?.slice(0, 500) || null,
+    model: meta.model || null,
+    provider: meta.provider || null,
+    size: meta.size || null,
+    style: meta.style || null,
   });
 
   if (dbError) {
-    // Clean up the uploaded file if DB insert fails
-    await supabase.storage.from(BUCKET).remove([storagePath]);
-    throw new Error(`Image metadata insert failed: ${dbError.message}`);
+    console.error("[image-storage] Failed to save image metadata:", dbError.message);
+    // Don't throw — the image is already in Storage and usable.
+    // The metadata row can be backfilled later if needed.
   }
-
-  return { id, publicUrl, storagePath };
 }
 
 /**
@@ -116,7 +132,7 @@ export async function fetchGeneratedImages(opts?: {
     query = query.eq("conversation_id", opts.conversationId);
   }
 
-  const { data, error, count } = await query;
+  const { data, error } = await query;
 
   if (error) throw new Error(`Failed to fetch images: ${error.message}`);
 
@@ -133,7 +149,6 @@ export async function fetchGeneratedImages(opts?: {
       messageId: row.message_id,
       createdAt: row.created_at,
     })),
-    total: count,
   };
 }
 
