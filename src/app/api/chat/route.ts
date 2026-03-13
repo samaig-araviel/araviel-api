@@ -3,6 +3,8 @@ import { callADE } from "@/lib/ade";
 import { calculateCost } from "@/lib/cost";
 import { getProvider, getAvailableProviders } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
+import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
+import type { AravielMeta } from "@/lib/stream/meta-parser";
 import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
@@ -723,6 +725,7 @@ interface StreamResult {
   latencyMs: number;
   webSearchUsed: boolean;
   error?: string;
+  meta?: AravielMeta | null;
 }
 
 interface ApiCallLogEntry {
@@ -862,15 +865,59 @@ async function streamFromProvider(
       enableImageGeneration,
     });
 
+    // Tail buffer to prevent <araviel_meta> block from flashing in the UI.
+    // We hold back content once we detect a potential partial meta tag.
+    let tailBuffer = "";
+    const META_OPEN = "<araviel_meta>";
+
+    async function flushSafeDelta(chunk: string): Promise<void> {
+      tailBuffer += chunk;
+
+      // Once we see the start of the meta block, hold everything from that point
+      const metaIdx = tailBuffer.indexOf(META_OPEN);
+      if (metaIdx !== -1) {
+        // Flush everything before the meta tag, hold the rest
+        const safe = tailBuffer.slice(0, metaIdx);
+        tailBuffer = tailBuffer.slice(metaIdx);
+        if (safe) {
+          await sendSSE(writer, encoder, { type: "delta", data: { content: safe } });
+        }
+        return;
+      }
+
+      // Check if the tail might be a partial opening tag
+      if (containsPartialMeta(tailBuffer)) {
+        // Find the longest suffix that could be a partial match
+        let holdFrom = tailBuffer.length;
+        for (let i = 1; i <= META_OPEN.length && i <= tailBuffer.length; i++) {
+          const suffix = tailBuffer.slice(-i);
+          if (META_OPEN.startsWith(suffix)) {
+            holdFrom = tailBuffer.length - i;
+            break;
+          }
+        }
+        const safe = tailBuffer.slice(0, holdFrom);
+        tailBuffer = tailBuffer.slice(holdFrom);
+        if (safe) {
+          await sendSSE(writer, encoder, { type: "delta", data: { content: safe } });
+        }
+        return;
+      }
+
+      // No meta risk — flush everything
+      const toSend = tailBuffer;
+      tailBuffer = "";
+      if (toSend) {
+        await sendSSE(writer, encoder, { type: "delta", data: { content: toSend } });
+      }
+    }
+
     for await (const event of providerStream) {
       switch (event.type) {
         case "delta":
           if (event.content) {
             content += event.content;
-            await sendSSE(writer, encoder, {
-              type: "delta",
-              data: { content: event.content },
-            });
+            await flushSafeDelta(event.content);
           }
           break;
         case "thinking":
@@ -930,6 +977,16 @@ async function streamFromProvider(
       }
     }
 
+    // If there's any remaining tail buffer that wasn't part of the meta block, flush it.
+    // (This handles the case where the AI didn't produce a meta block at all.)
+    const { cleanContent, meta } = extractAravielMeta(content);
+
+    // Flush any buffered non-meta content that wasn't sent during streaming
+    // The tailBuffer may contain the meta block or leftover content
+    if (tailBuffer && !tailBuffer.includes(META_OPEN)) {
+      await sendSSE(writer, encoder, { type: "delta", data: { content: tailBuffer } });
+    }
+
     const latencyMs = Date.now() - start;
 
     apiCallLogs.push({
@@ -941,12 +998,13 @@ async function streamFromProvider(
 
     return {
       success: true,
-      content,
+      content: cleanContent,
       thinkingContent,
       citations,
       usage,
       latencyMs,
       webSearchUsed,
+      meta,
     };
   } catch (err) {
     const latencyMs = Date.now() - start;
@@ -1036,6 +1094,22 @@ async function finalize(
   }
 
   await updateConversationTimestamp(conversationId);
+
+  // Send follow-ups and questions from parsed metadata before the done event
+  if (result.meta) {
+    if (result.meta.followUps.length > 0) {
+      await sendSSE(writer, encoder, {
+        type: "followups",
+        data: { suggestions: result.meta.followUps },
+      });
+    }
+    if (result.meta.questions.length > 0) {
+      await sendSSE(writer, encoder, {
+        type: "questions",
+        data: { questions: result.meta.questions },
+      });
+    }
+  }
 
   await sendSSE(writer, encoder, {
     type: "done",
