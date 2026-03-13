@@ -32,7 +32,7 @@ import {
   getImageCapableModels,
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
-import { uploadGeneratedImage } from "@/lib/image-storage";
+import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
@@ -274,6 +274,7 @@ async function handleChat(
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 
     const apiCallLogs: ApiCallLogEntry[] = [];
+    const pendingImages: PendingImageMeta[] = [];
 
     // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
     if (enableImageGeneration && isImageGenerationModel(model.id)) {
@@ -293,20 +294,19 @@ async function handleChat(
         let imageUrl = imageResult.url;
         let imageId: string | undefined;
         try {
-          const stored = await uploadGeneratedImage({
+          const stored = await uploadImageToStorage({
             imageDataUrl: imageResult.url,
             conversationId,
-            messageId,
-            prompt: chatReq.message,
-            model: model.name,
-            provider: model.provider,
-            size: imageResult.size,
-            style: imageResult.style,
           });
           imageUrl = stored.publicUrl;
           imageId = stored.id;
-        } catch {
-          // Storage upload failed — fall back to inline data URI
+          pendingImages.push({
+            id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
+            prompt: chatReq.message, model: model.name, provider: model.provider,
+            size: imageResult.size, style: imageResult.style,
+          });
+        } catch (uploadErr) {
+          console.error("[chat] Image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
         }
 
         await sendSSE(writer, encoder, {
@@ -346,7 +346,8 @@ async function handleChat(
           apiCallLogs,
           writer,
           encoder,
-          subConversationId
+          subConversationId,
+          pendingImages
         );
         return;
       } catch (err) {
@@ -388,20 +389,19 @@ async function handleChat(
             let backupImageUrl = backupImageResult.url;
             let backupImageId: string | undefined;
             try {
-              const stored = await uploadGeneratedImage({
+              const stored = await uploadImageToStorage({
                 imageDataUrl: backupImageResult.url,
                 conversationId,
-                messageId,
-                prompt: chatReq.message,
-                model: backup.name,
-                provider: backup.provider,
-                size: backupImageResult.size,
-                style: backupImageResult.style,
               });
               backupImageUrl = stored.publicUrl;
               backupImageId = stored.id;
-            } catch {
-              // Storage upload failed — fall back to inline data URI
+              pendingImages.push({
+                id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
+                prompt: chatReq.message, model: backup.name, provider: backup.provider,
+                size: backupImageResult.size, style: backupImageResult.style,
+              });
+            } catch (uploadErr) {
+              console.error("[chat] Backup image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
             }
 
             await sendSSE(writer, encoder, {
@@ -441,7 +441,8 @@ async function handleChat(
               apiCallLogs,
               writer,
               encoder,
-              subConversationId
+              subConversationId,
+              pendingImages
             );
             return;
           } catch (backupErr) {
@@ -504,20 +505,19 @@ async function handleChat(
             let fbImageUrl = imageResult.url;
             let fbImageId: string | undefined;
             try {
-              const stored = await uploadGeneratedImage({
+              const stored = await uploadImageToStorage({
                 imageDataUrl: imageResult.url,
                 conversationId,
-                messageId,
-                prompt: chatReq.message,
-                model: imageBackup.name,
-                provider: imageBackup.provider,
-                size: imageResult.size,
-                style: imageResult.style,
               });
               fbImageUrl = stored.publicUrl;
               fbImageId = stored.id;
-            } catch {
-              // Storage upload failed — fall back to inline data URI
+              pendingImages.push({
+                id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
+                prompt: chatReq.message, model: imageBackup.name, provider: imageBackup.provider,
+                size: imageResult.size, style: imageResult.style,
+              });
+            } catch (uploadErr) {
+              console.error("[chat] Fallback image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
             }
 
             await sendSSE(writer, encoder, {
@@ -557,7 +557,8 @@ async function handleChat(
               apiCallLogs,
               writer,
               encoder,
-              subConversationId
+              subConversationId,
+              pendingImages
             );
             return;
           } catch (err) {
@@ -585,7 +586,8 @@ async function handleChat(
             encoder,
             apiCallLogs,
             conversationId,
-            messageId
+            messageId,
+            pendingImages
           );
 
           if (backupResult.success) {
@@ -600,7 +602,8 @@ async function handleChat(
               apiCallLogs,
               writer,
               encoder,
-              subConversationId
+              subConversationId,
+              pendingImages
             );
             return;
           }
@@ -610,13 +613,13 @@ async function handleChat(
 
       // No image-capable backup in ADE alternates — auto-fallback to dedicated image model
       const dedicatedFallback = await tryDedicatedImageFallback(
-        chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId
+        chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages
       );
       if (dedicatedFallback) {
         await finalize(
           messageId, conversationId, dedicatedFallback,
           model, backupModels, adeResponse, adeLatencyMs,
-          apiCallLogs, writer, encoder, subConversationId
+          apiCallLogs, writer, encoder, subConversationId, pendingImages
         );
         return;
       }
@@ -648,7 +651,7 @@ async function handleChat(
       await finalize(
         messageId, conversationId, helpStreamResult,
         model, backupModels, adeResponse, adeLatencyMs,
-        apiCallLogs, writer, encoder, subConversationId
+        apiCallLogs, writer, encoder, subConversationId, pendingImages
       );
       return;
     }
@@ -666,7 +669,8 @@ async function handleChat(
       encoder,
       apiCallLogs,
       conversationId,
-      messageId
+      messageId,
+      pendingImages
     );
 
     // 13. If primary failed, try backup
@@ -694,20 +698,21 @@ async function handleChat(
           encoder,
           apiCallLogs,
           conversationId,
-          messageId
+          messageId,
+          pendingImages
         );
 
         if (!backupResult.success) {
           // If image generation was requested, try a dedicated image model as last resort
           if (enableImageGeneration) {
             const dedicatedFallback = await tryDedicatedImageFallback(
-              chatReq.message, model, apiCallLogs, writer, encoder
+              chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages
             );
             if (dedicatedFallback) {
               await finalize(
                 messageId, conversationId, dedicatedFallback,
                 model, backupModels, adeResponse, adeLatencyMs,
-                apiCallLogs, writer, encoder, subConversationId
+                apiCallLogs, writer, encoder, subConversationId, pendingImages
               );
               return;
             }
@@ -734,19 +739,20 @@ async function handleChat(
           apiCallLogs,
           writer,
           encoder,
-          subConversationId
+          subConversationId,
+          pendingImages
         );
       } else {
         // No backup model — if image gen was requested, try a dedicated image model
         if (enableImageGeneration) {
           const dedicatedFallback = await tryDedicatedImageFallback(
-            chatReq.message, model, apiCallLogs, writer, encoder
+            chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages
           );
           if (dedicatedFallback) {
             await finalize(
               messageId, conversationId, dedicatedFallback,
               model, backupModels, adeResponse, adeLatencyMs,
-              apiCallLogs, writer, encoder, subConversationId
+              apiCallLogs, writer, encoder, subConversationId, pendingImages
             );
             return;
           }
@@ -773,7 +779,8 @@ async function handleChat(
         apiCallLogs,
         writer,
         encoder,
-        subConversationId
+        subConversationId,
+        pendingImages
       );
     }
   } catch (err) {
@@ -798,6 +805,17 @@ interface StreamResult {
   webSearchUsed: boolean;
   error?: string;
   meta?: AravielMeta | null;
+}
+
+interface PendingImageMeta {
+  id: string;
+  storagePath: string;
+  publicUrl: string;
+  prompt: string;
+  model: string;
+  provider: string;
+  size?: string;
+  style?: string;
 }
 
 interface ApiCallLogEntry {
@@ -830,7 +848,8 @@ async function tryDedicatedImageFallback(
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder,
   conversationId?: string,
-  messageId?: string
+  messageId?: string,
+  pendingImages?: PendingImageMeta[]
 ): Promise<StreamResult | null> {
   for (const imgModel of FALLBACK_IMAGE_MODELS) {
     // Skip models whose API key is not configured
@@ -862,22 +881,23 @@ async function tryDedicatedImageFallback(
       // Upload to Supabase Storage
       let dlImageUrl = imageResult.url;
       let dlImageId: string | undefined;
-      if (conversationId && messageId) {
+      if (conversationId) {
         try {
-          const stored = await uploadGeneratedImage({
+          const stored = await uploadImageToStorage({
             imageDataUrl: imageResult.url,
             conversationId,
-            messageId,
-            prompt,
-            model: imgModel.name,
-            provider: imgModel.provider,
-            size: imageResult.size,
-            style: imageResult.style,
           });
           dlImageUrl = stored.publicUrl;
           dlImageId = stored.id;
-        } catch {
-          // Storage upload failed — fall back to inline data URI
+          if (pendingImages) {
+            pendingImages.push({
+              id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
+              prompt, model: imgModel.name, provider: imgModel.provider,
+              size: imageResult.size, style: imageResult.style,
+            });
+          }
+        } catch (uploadErr) {
+          console.error("[chat] Dedicated fallback image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
         }
       }
 
@@ -932,7 +952,8 @@ async function streamFromProvider(
   encoder: TextEncoder,
   apiCallLogs: ApiCallLogEntry[],
   conversationId?: string,
-  messageId?: string
+  messageId?: string,
+  pendingImages?: PendingImageMeta[]
 ): Promise<StreamResult> {
   const start = Date.now();
   let content = "";
@@ -1048,20 +1069,22 @@ async function streamFromProvider(
             // Upload to Supabase Storage
             let nativeImageUrl = event.imageUrl;
             let nativeImageId: string | undefined;
-            if (conversationId && messageId) {
+            if (conversationId) {
               try {
-                const stored = await uploadGeneratedImage({
+                const stored = await uploadImageToStorage({
                   imageDataUrl: event.imageUrl,
                   conversationId,
-                  messageId,
-                  prompt: userPrompt,
-                  model: model.name,
-                  provider: model.provider,
                 });
                 nativeImageUrl = stored.publicUrl;
                 nativeImageId = stored.id;
-              } catch {
-                // Storage upload failed — fall back to inline data URI
+                if (pendingImages) {
+                  pendingImages.push({
+                    id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
+                    prompt: userPrompt, model: model.name, provider: model.provider,
+                  });
+                }
+              } catch (uploadErr) {
+                console.error("[chat] Native image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
               }
             }
             await sendSSE(writer, encoder, {
@@ -1161,7 +1184,8 @@ async function finalize(
   apiCallLogs: ApiCallLogEntry[],
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder,
-  subConversationId?: string
+  subConversationId?: string,
+  pendingImages?: PendingImageMeta[]
 ): Promise<void> {
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
@@ -1203,6 +1227,17 @@ async function finalize(
     extendedData,
     subConversationId,
   });
+
+  // Now that the message row exists, insert image metadata (FK on message_id is satisfied)
+  if (pendingImages && pendingImages.length > 0) {
+    for (const img of pendingImages) {
+      await saveImageMetadata({
+        ...img,
+        conversationId,
+        messageId,
+      });
+    }
+  }
 
   // Save routing log and API call logs now that message exists
   await saveRoutingLog(messageId, adeResponse, adeLatencyMs);
