@@ -32,6 +32,7 @@ import {
   getImageCapableModels,
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
+import { uploadGeneratedImage } from "@/lib/image-storage";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
@@ -288,20 +289,41 @@ async function handleChat(
           latencyMs,
         });
 
+        // Upload to Supabase Storage and get a persistent public URL
+        let imageUrl = imageResult.url;
+        let imageId: string | undefined;
+        try {
+          const stored = await uploadGeneratedImage({
+            imageDataUrl: imageResult.url,
+            conversationId,
+            messageId,
+            prompt: chatReq.message,
+            model: model.name,
+            provider: model.provider,
+            size: imageResult.size,
+            style: imageResult.style,
+          });
+          imageUrl = stored.publicUrl;
+          imageId = stored.id;
+        } catch {
+          // Storage upload failed — fall back to inline data URI
+        }
+
         await sendSSE(writer, encoder, {
           type: "image_generation",
           data: {
-            url: imageResult.url,
+            url: imageUrl,
             prompt: chatReq.message,
             model: model.name,
             provider: model.provider,
             size: imageResult.size ?? "1024x1024",
             style: imageResult.style ?? null,
+            id: imageId,
           },
         });
 
         // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-        const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${imageResult.url})`;
+        const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${imageUrl})`;
 
         const imageStreamResult: StreamResult = {
           success: true,
@@ -362,20 +384,41 @@ async function handleChat(
               latencyMs: backupLatencyMs,
             });
 
+            // Upload to Supabase Storage
+            let backupImageUrl = backupImageResult.url;
+            let backupImageId: string | undefined;
+            try {
+              const stored = await uploadGeneratedImage({
+                imageDataUrl: backupImageResult.url,
+                conversationId,
+                messageId,
+                prompt: chatReq.message,
+                model: backup.name,
+                provider: backup.provider,
+                size: backupImageResult.size,
+                style: backupImageResult.style,
+              });
+              backupImageUrl = stored.publicUrl;
+              backupImageId = stored.id;
+            } catch {
+              // Storage upload failed — fall back to inline data URI
+            }
+
             await sendSSE(writer, encoder, {
               type: "image_generation",
               data: {
-                url: backupImageResult.url,
+                url: backupImageUrl,
                 prompt: chatReq.message,
                 model: backup.name,
                 provider: backup.provider,
                 size: backupImageResult.size ?? "1024x1024",
                 style: backupImageResult.style ?? null,
+                id: backupImageId,
               },
             });
 
             // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${backupImageResult.url})`;
+            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${backupImageUrl})`;
 
             const backupStreamResult: StreamResult = {
               success: true,
@@ -457,20 +500,41 @@ async function handleChat(
               latencyMs,
             });
 
+            // Upload to Supabase Storage
+            let fbImageUrl = imageResult.url;
+            let fbImageId: string | undefined;
+            try {
+              const stored = await uploadGeneratedImage({
+                imageDataUrl: imageResult.url,
+                conversationId,
+                messageId,
+                prompt: chatReq.message,
+                model: imageBackup.name,
+                provider: imageBackup.provider,
+                size: imageResult.size,
+                style: imageResult.style,
+              });
+              fbImageUrl = stored.publicUrl;
+              fbImageId = stored.id;
+            } catch {
+              // Storage upload failed — fall back to inline data URI
+            }
+
             await sendSSE(writer, encoder, {
               type: "image_generation",
               data: {
-                url: imageResult.url,
+                url: fbImageUrl,
                 prompt: chatReq.message,
                 model: imageBackup.name,
                 provider: imageBackup.provider,
                 size: imageResult.size ?? "1024x1024",
                 style: imageResult.style ?? null,
+                id: fbImageId,
               },
             });
 
             // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${imageResult.url})`;
+            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${fbImageUrl})`;
 
             const imageStreamResult: StreamResult = {
               success: true,
@@ -519,7 +583,9 @@ async function handleChat(
             chatReq.message,
             writer,
             encoder,
-            apiCallLogs
+            apiCallLogs,
+            conversationId,
+            messageId
           );
 
           if (backupResult.success) {
@@ -544,7 +610,7 @@ async function handleChat(
 
       // No image-capable backup in ADE alternates — auto-fallback to dedicated image model
       const dedicatedFallback = await tryDedicatedImageFallback(
-        chatReq.message, model, apiCallLogs, writer, encoder
+        chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId
       );
       if (dedicatedFallback) {
         await finalize(
@@ -598,7 +664,9 @@ async function handleChat(
       chatReq.message,
       writer,
       encoder,
-      apiCallLogs
+      apiCallLogs,
+      conversationId,
+      messageId
     );
 
     // 13. If primary failed, try backup
@@ -624,7 +692,9 @@ async function handleChat(
           chatReq.message,
           writer,
           encoder,
-          apiCallLogs
+          apiCallLogs,
+          conversationId,
+          messageId
         );
 
         if (!backupResult.success) {
@@ -758,7 +828,9 @@ async function tryDedicatedImageFallback(
   originalModel: ModelInfo,
   apiCallLogs: ApiCallLogEntry[],
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  encoder: TextEncoder
+  encoder: TextEncoder,
+  conversationId?: string,
+  messageId?: string
 ): Promise<StreamResult | null> {
   for (const imgModel of FALLBACK_IMAGE_MODELS) {
     // Skip models whose API key is not configured
@@ -787,19 +859,42 @@ async function tryDedicatedImageFallback(
         latencyMs,
       });
 
+      // Upload to Supabase Storage
+      let dlImageUrl = imageResult.url;
+      let dlImageId: string | undefined;
+      if (conversationId && messageId) {
+        try {
+          const stored = await uploadGeneratedImage({
+            imageDataUrl: imageResult.url,
+            conversationId,
+            messageId,
+            prompt,
+            model: imgModel.name,
+            provider: imgModel.provider,
+            size: imageResult.size,
+            style: imageResult.style,
+          });
+          dlImageUrl = stored.publicUrl;
+          dlImageId = stored.id;
+        } catch {
+          // Storage upload failed — fall back to inline data URI
+        }
+      }
+
       await sendSSE(writer, encoder, {
         type: "image_generation",
         data: {
-          url: imageResult.url,
+          url: dlImageUrl,
           prompt,
           model: imgModel.name,
           provider: imgModel.provider,
           size: imageResult.size ?? "1024x1024",
           style: imageResult.style ?? null,
+          id: dlImageId,
         },
       });
 
-      const markdownContent = `![Generated image: ${prompt.slice(0, 100)}](${imageResult.url})\n\n*${imgModel.name} — "${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}"*`;
+      const markdownContent = `![Generated image: ${prompt.slice(0, 100)}](${dlImageUrl})\n\n*${imgModel.name} — "${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}"*`;
       return {
         success: true,
         content: markdownContent,
@@ -835,7 +930,9 @@ async function streamFromProvider(
   userPrompt: string,
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder,
-  apiCallLogs: ApiCallLogEntry[]
+  apiCallLogs: ApiCallLogEntry[],
+  conversationId?: string,
+  messageId?: string
 ): Promise<StreamResult> {
   const start = Date.now();
   let content = "";
@@ -948,16 +1045,36 @@ async function streamFromProvider(
           break;
         case "image_generation":
           if (event.imageUrl) {
+            // Upload to Supabase Storage
+            let nativeImageUrl = event.imageUrl;
+            let nativeImageId: string | undefined;
+            if (conversationId && messageId) {
+              try {
+                const stored = await uploadGeneratedImage({
+                  imageDataUrl: event.imageUrl,
+                  conversationId,
+                  messageId,
+                  prompt: userPrompt,
+                  model: model.name,
+                  provider: model.provider,
+                });
+                nativeImageUrl = stored.publicUrl;
+                nativeImageId = stored.id;
+              } catch {
+                // Storage upload failed — fall back to inline data URI
+              }
+            }
             await sendSSE(writer, encoder, {
               type: "image_generation",
               data: {
-                url: event.imageUrl,
+                url: nativeImageUrl,
                 prompt: userPrompt,
                 model: model.name,
                 provider: model.provider,
+                id: nativeImageId,
               },
             });
-            content += `\n![Generated image: ${userPrompt.slice(0, 100)}](${event.imageUrl})\n`;
+            content += `\n![Generated image: ${userPrompt.slice(0, 100)}](${nativeImageUrl})\n`;
           }
           break;
         case "tool_use":
