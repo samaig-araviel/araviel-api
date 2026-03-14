@@ -15,7 +15,9 @@ export interface ChatRequest {
   projectId?: string;
   message: string;
   userTier?: string;
+  userId?: string;
   modality?: string;
+  imageQuality?: "standard" | "hd" | "ultra";
   selectedModelId?: string;
   webSearch?: boolean;
   tone?: string;

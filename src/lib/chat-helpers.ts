@@ -43,7 +43,11 @@ export function validateChatRequest(body: unknown): ChatRequest {
     projectId: typeof req.projectId === "string" ? req.projectId : undefined,
     message: req.message.trim(),
     userTier: typeof req.userTier === "string" ? req.userTier : "free",
+    userId: typeof req.userId === "string" ? req.userId : undefined,
     modality: typeof req.modality === "string" ? req.modality : "text",
+    imageQuality: typeof req.imageQuality === "string" && ["standard", "hd", "ultra"].includes(req.imageQuality)
+      ? (req.imageQuality as "standard" | "hd" | "ultra")
+      : undefined,
     selectedModelId: typeof req.selectedModelId === "string" ? req.selectedModelId : undefined,
     webSearch: typeof req.webSearch === "boolean" ? req.webSearch : undefined,
     tone: typeof req.tone === "string" ? req.tone : undefined,
