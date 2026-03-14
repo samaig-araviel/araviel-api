@@ -116,8 +116,7 @@ export async function getBalance(userId: string): Promise<CreditBalance> {
     .select("credits_total, credits_used")
     .eq("user_id", userId)
     .eq("feature", "image")
-    .gt("expires_at", new Date().toISOString())
-    .lt("credits_used", sb.rpc ? 0 : 999999); // We'll filter in JS
+    .gt("expires_at", new Date().toISOString());
 
   const activePacks = (packs ?? []).filter(
     (p: { credits_total: number; credits_used: number }) => p.credits_used < p.credits_total
