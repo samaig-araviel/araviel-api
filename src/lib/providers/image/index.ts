@@ -28,7 +28,7 @@ export async function generateImage(
 
   switch (provider) {
     case "openai":
-      return generateOpenAIImage(modelId, trimmedPrompt, { quality: mapOpenAIQuality(modelId, quality) });
+      return generateOpenAIImage(modelId, trimmedPrompt, { quality: mapOpenAIQuality(modelId, quality) as "low" | "medium" | "high" | "auto" | "standard" | "hd" });
     case "google":
       return generateGoogleImage(modelId, trimmedPrompt);
     case "stability":
