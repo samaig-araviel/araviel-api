@@ -33,6 +33,7 @@ import {
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
+import { canGenerate, chargeCredits } from "@/lib/credits";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
@@ -268,6 +269,25 @@ async function handleChat(
     const enableImageGeneration =
       adeResponse.analysis.intent === "image_generation" || chatReq.modality === "image";
 
+    // 13b. Credit check for image generation
+    const imageQuality = chatReq.imageQuality ?? "standard";
+    if (enableImageGeneration && chatReq.userId) {
+      const creditCheck = await canGenerate(chatReq.userId, imageQuality);
+      if (!creditCheck.allowed) {
+        await sendSSE(writer, encoder, {
+          type: "error",
+          data: {
+            message: creditCheck.reason ?? "Insufficient image credits",
+            code: "INSUFFICIENT_CREDITS",
+            creditsRequired: creditCheck.cost,
+            creditsAvailable: creditCheck.balance,
+          },
+        });
+        await writer.close();
+        return;
+      }
+    }
+
     const includeFileInstructions = detectFileIntent(chatReq.message);
     const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions });
     const enableWebSearch = shouldUseWebSearch;
@@ -275,12 +295,17 @@ async function handleChat(
 
     const apiCallLogs: ApiCallLogEntry[] = [];
     const pendingImages: PendingImageMeta[] = [];
+    const creditInfo = {
+      userId: chatReq.userId,
+      imageQuality: imageQuality,
+      wasImageGeneration: enableImageGeneration,
+    };
 
     // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
     if (enableImageGeneration && isImageGenerationModel(model.id)) {
       const start = Date.now();
       try {
-        const imageResult = await generateImage(model.provider, model.id, chatReq.message);
+        const imageResult = await generateImage(model.provider, model.id, chatReq.message, imageQuality as import("@/lib/providers/image").ImageQuality);
         const latencyMs = Date.now() - start;
 
         apiCallLogs.push({
@@ -318,6 +343,7 @@ async function handleChat(
             provider: model.provider,
             size: imageResult.size ?? "1024x1024",
             style: imageResult.style ?? null,
+            quality: imageQuality,
             id: imageId,
           },
         });
@@ -347,7 +373,8 @@ async function handleChat(
           writer,
           encoder,
           subConversationId,
-          pendingImages
+          pendingImages,
+          creditInfo
         );
         return;
       } catch (err) {
@@ -375,7 +402,7 @@ async function handleChat(
 
           const backupStart = Date.now();
           try {
-            const backupImageResult = await generateImage(backup.provider, backup.id, chatReq.message);
+            const backupImageResult = await generateImage(backup.provider, backup.id, chatReq.message, imageQuality as import("@/lib/providers/image").ImageQuality);
             const backupLatencyMs = Date.now() - backupStart;
 
             apiCallLogs.push({
@@ -413,6 +440,7 @@ async function handleChat(
                 provider: backup.provider,
                 size: backupImageResult.size ?? "1024x1024",
                 style: backupImageResult.style ?? null,
+                quality: imageQuality,
                 id: backupImageId,
               },
             });
@@ -442,7 +470,8 @@ async function handleChat(
               writer,
               encoder,
               subConversationId,
-              pendingImages
+              pendingImages,
+              creditInfo
             );
             return;
           } catch (backupErr) {
@@ -491,7 +520,7 @@ async function handleChat(
           // Backup is a dedicated image model — use image generation API
           const start = Date.now();
           try {
-            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, chatReq.message);
+            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, chatReq.message, imageQuality as import("@/lib/providers/image").ImageQuality);
             const latencyMs = Date.now() - start;
 
             apiCallLogs.push({
@@ -529,6 +558,7 @@ async function handleChat(
                 provider: imageBackup.provider,
                 size: imageResult.size ?? "1024x1024",
                 style: imageResult.style ?? null,
+                quality: imageQuality,
                 id: fbImageId,
               },
             });
@@ -558,7 +588,8 @@ async function handleChat(
               writer,
               encoder,
               subConversationId,
-              pendingImages
+              pendingImages,
+              creditInfo
             );
             return;
           } catch (err) {
@@ -603,7 +634,8 @@ async function handleChat(
               writer,
               encoder,
               subConversationId,
-              pendingImages
+              pendingImages,
+              creditInfo
             );
             return;
           }
@@ -619,7 +651,8 @@ async function handleChat(
         await finalize(
           messageId, conversationId, dedicatedFallback,
           model, backupModels, adeResponse, adeLatencyMs,
-          apiCallLogs, writer, encoder, subConversationId, pendingImages
+          apiCallLogs, writer, encoder, subConversationId, pendingImages,
+          creditInfo
         );
         return;
       }
@@ -651,7 +684,8 @@ async function handleChat(
       await finalize(
         messageId, conversationId, helpStreamResult,
         model, backupModels, adeResponse, adeLatencyMs,
-        apiCallLogs, writer, encoder, subConversationId, pendingImages
+        apiCallLogs, writer, encoder, subConversationId, pendingImages,
+        creditInfo
       );
       return;
     }
@@ -712,7 +746,8 @@ async function handleChat(
               await finalize(
                 messageId, conversationId, dedicatedFallback,
                 model, backupModels, adeResponse, adeLatencyMs,
-                apiCallLogs, writer, encoder, subConversationId, pendingImages
+                apiCallLogs, writer, encoder, subConversationId, pendingImages,
+                creditInfo
               );
               return;
             }
@@ -740,7 +775,8 @@ async function handleChat(
           writer,
           encoder,
           subConversationId,
-          pendingImages
+          pendingImages,
+          creditInfo
         );
       } else {
         // No backup model — if image gen was requested, try a dedicated image model
@@ -752,7 +788,8 @@ async function handleChat(
             await finalize(
               messageId, conversationId, dedicatedFallback,
               model, backupModels, adeResponse, adeLatencyMs,
-              apiCallLogs, writer, encoder, subConversationId, pendingImages
+              apiCallLogs, writer, encoder, subConversationId, pendingImages,
+              creditInfo
             );
             return;
           }
@@ -780,7 +817,8 @@ async function handleChat(
         writer,
         encoder,
         subConversationId,
-        pendingImages
+        pendingImages,
+        creditInfo
       );
     }
   } catch (err) {
@@ -868,7 +906,7 @@ async function tryDedicatedImageFallback(
         },
       });
 
-      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt);
+      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt, "standard");
       const latencyMs = Date.now() - start;
 
       apiCallLogs.push({
@@ -910,6 +948,7 @@ async function tryDedicatedImageFallback(
           provider: imgModel.provider,
           size: imageResult.size ?? "1024x1024",
           style: imageResult.style ?? null,
+          quality: "standard",
           id: dlImageId,
         },
       });
@@ -1185,7 +1224,8 @@ async function finalize(
   writer: WritableStreamDefaultWriter<Uint8Array>,
   encoder: TextEncoder,
   subConversationId?: string,
-  pendingImages?: PendingImageMeta[]
+  pendingImages?: PendingImageMeta[],
+  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean }
 ): Promise<void> {
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
@@ -1255,6 +1295,26 @@ async function finalize(
 
   await updateConversationTimestamp(conversationId);
 
+  // Charge credits for image generation
+  let creditChargeResult: { creditsCharged?: number; remainingBalance?: number } = {};
+  if (creditInfo?.wasImageGeneration && creditInfo?.userId && pendingImages && pendingImages.length > 0) {
+    try {
+      const charge = await chargeCredits(creditInfo.userId, creditInfo.imageQuality ?? "standard", {
+        modelUsed: model.id,
+        provider: model.provider,
+        conversationId,
+        messageId,
+        prompt: pendingImages[0]?.prompt,
+      });
+      creditChargeResult = {
+        creditsCharged: charge.creditsCharged,
+        remainingBalance: charge.remainingBalance,
+      };
+    } catch (err) {
+      console.error("[chat] Credit charge failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
   // Send follow-ups and questions from parsed metadata before the done event
   if (result.meta) {
     if (result.meta.followUps.length > 0) {
@@ -1286,6 +1346,13 @@ async function finalize(
       },
       latencyMs: result.latencyMs,
       adeLatencyMs,
+      ...(creditChargeResult.creditsCharged !== undefined && {
+        credits: {
+          charged: creditChargeResult.creditsCharged,
+          remaining: creditChargeResult.remainingBalance,
+          quality: creditInfo?.imageQuality ?? "standard",
+        },
+      }),
     },
   });
 
