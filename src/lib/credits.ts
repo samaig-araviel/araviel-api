@@ -4,8 +4,8 @@ import { getSupabase } from "./supabase";
 
 export const TIER_MONTHLY_CREDITS: Record<string, number> = {
   free: 5,
-  pro: 50,
-  premium: 200,
+  lite: 50,
+  pro: 200,
 };
 
 export const IMAGE_QUALITY_COSTS: Record<string, number> = {
