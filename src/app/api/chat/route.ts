@@ -228,6 +228,7 @@ async function handleChat(
             usage: { ...ZERO_USAGE, costUsd: 0 },
             latencyMs: greetingLatencyMs,
             adeLatencyMs: 0,
+            thinkingDurationMs: 0,
           },
         });
 
@@ -445,6 +446,7 @@ async function handleChat(
           thinkingContent: "",
           citations: [],
           usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+          thinkingDurationMs: 0,
           latencyMs,
           webSearchUsed: false,
         };
@@ -542,6 +544,7 @@ async function handleChat(
               thinkingContent: "",
               citations: [],
               usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+              thinkingDurationMs: 0,
               latencyMs: backupLatencyMs,
               webSearchUsed: false,
             };
@@ -660,6 +663,7 @@ async function handleChat(
               thinkingContent: "",
               citations: [],
               usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+              thinkingDurationMs: 0,
               latencyMs,
               webSearchUsed: false,
             };
@@ -765,6 +769,7 @@ async function handleChat(
         thinkingContent: "",
         citations: [],
         usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+        thinkingDurationMs: 0,
         latencyMs: 0,
         webSearchUsed: false,
       };
@@ -928,6 +933,8 @@ interface StreamResult {
   citations: Array<{ url: string; title: string; snippet?: string }>;
   usage: TokenUsage;
   latencyMs: number;
+  /** Wall-clock ms the model spent in thinking/reasoning phase (0 if no thinking). */
+  thinkingDurationMs: number;
   webSearchUsed: boolean;
   error?: string;
   meta?: AravielMeta | null;
@@ -1048,6 +1055,7 @@ async function tryDedicatedImageFallback(
         thinkingContent: "",
         citations: [],
         usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 },
+        thinkingDurationMs: 0,
         latencyMs,
         webSearchUsed: false,
       };
@@ -1093,6 +1101,10 @@ async function streamFromProvider(
     cachedTokens: 0,
   };
   let webSearchUsed = false;
+
+  // Track thinking phase timing: from first thinking event to first delta event
+  let thinkingStartMs = 0;
+  let thinkingEndMs = 0;
 
   try {
     if (!SUPPORTED_PROVIDERS.has(model.provider)) {
@@ -1163,12 +1175,15 @@ async function streamFromProvider(
       switch (event.type) {
         case "delta":
           if (event.content) {
+            // Mark end of thinking phase on first content delta
+            if (thinkingStartMs && !thinkingEndMs) thinkingEndMs = Date.now();
             content += event.content;
             await flushSafeDelta(event.content);
           }
           break;
         case "thinking":
           if (event.content) {
+            if (!thinkingStartMs) thinkingStartMs = Date.now();
             thinkingContent += event.content;
             await sendSSE(writer, encoder, {
               type: "thinking",
@@ -1265,6 +1280,10 @@ async function streamFromProvider(
       latencyMs,
     });
 
+    // If thinking ended but delta never arrived (e.g. empty response), close the window now
+    if (thinkingStartMs && !thinkingEndMs) thinkingEndMs = Date.now();
+    const thinkingDurationMs = thinkingStartMs ? thinkingEndMs - thinkingStartMs : 0;
+
     return {
       success: true,
       content: cleanContent,
@@ -1272,6 +1291,7 @@ async function streamFromProvider(
       citations,
       usage,
       latencyMs,
+      thinkingDurationMs,
       webSearchUsed,
       meta,
     };
@@ -1287,6 +1307,9 @@ async function streamFromProvider(
       errorMessage,
     });
 
+    if (thinkingStartMs && !thinkingEndMs) thinkingEndMs = Date.now();
+    const thinkingDurationMs = thinkingStartMs ? thinkingEndMs - thinkingStartMs : 0;
+
     return {
       success: false,
       content,
@@ -1294,6 +1317,7 @@ async function streamFromProvider(
       citations,
       usage,
       latencyMs,
+      thinkingDurationMs,
       webSearchUsed,
       error: errorMessage,
     };
@@ -1333,6 +1357,9 @@ async function finalize(
   const extendedData: Record<string, unknown> = {};
   if (result.thinkingContent) {
     extendedData.thinkingContent = result.thinkingContent;
+  }
+  if (result.thinkingDurationMs > 0) {
+    extendedData.thinkingDurationMs = result.thinkingDurationMs;
   }
   if (result.citations.length > 0) {
     extendedData.citations = result.citations;
@@ -1434,6 +1461,7 @@ async function finalize(
       },
       latencyMs: result.latencyMs,
       adeLatencyMs,
+      thinkingDurationMs: result.thinkingDurationMs,
       ...(creditChargeResult.creditsCharged !== undefined && {
         credits: {
           charged: creditChargeResult.creditsCharged,
