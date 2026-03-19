@@ -96,6 +96,39 @@ export function classifyGreeting(rawMessage: string): GreetingCategory {
   return null;
 }
 
+// ─── Interception policy ─────────────────────────────────────────────────────
+
+/**
+ * Determine whether a classified category should actually be intercepted,
+ * given the conversation context.
+ *
+ * Farewells and thanks are context-dependent — "thanks" after a code review
+ * should go through the model so it can respond contextually. We only intercept
+ * these when the conversation has no prior messages (it's the opening message).
+ *
+ * Greetings and identity questions are always safe to intercept regardless of
+ * conversation state — they're never context-dependent.
+ */
+export function shouldInterceptCategory(
+  category: GreetingCategory,
+  isFirstMessage: boolean
+): boolean {
+  if (!category) return false;
+
+  switch (category) {
+    case "greeting":
+    case "identity":
+      // Always safe to intercept
+      return true;
+    case "farewell":
+    case "thanks":
+      // Only intercept if it's the very first message (no prior context)
+      return isFirstMessage;
+    default:
+      return false;
+  }
+}
+
 // ─── Response generation ─────────────────────────────────────────────────────
 
 function getTimeOfDay(): "morning" | "afternoon" | "evening" {
