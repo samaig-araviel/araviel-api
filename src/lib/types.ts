@@ -70,6 +70,7 @@ export interface ADEUpgradeHint {
     name: string;
     provider: string;
   };
+  targetTier: 'lite' | 'pro';
   reason: string;
   scoreDifference: number;
 }
