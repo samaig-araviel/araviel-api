@@ -103,11 +103,17 @@ async function handleChat(
       );
     }
 
-    // 3. Save user message
-    await saveUserMessage(conversationId, chatReq.message, subConversationId);
+    // 3-5. Run independent DB operations in parallel:
+    //   - Save user message (write, doesn't block reads)
+    //   - Fetch conversation history (read)
+    //   - Get previous model for conversation coherence (read)
+    const [, fetchedHistory, previousModelUsed] = await Promise.all([
+      saveUserMessage(conversationId, chatReq.message, subConversationId),
+      fetchConversationHistory(conversationId, subConversationId),
+      getPreviousModelId(conversationId),
+    ]);
 
-    // 4. Fetch conversation history (sub-conversation history includes highlighted text context)
-    let history = await fetchConversationHistory(conversationId, subConversationId);
+    let history = fetchedHistory;
 
     // 4b. If an imported conversation ID is provided, prepend those messages
     if (chatReq.importedConversationId) {
@@ -144,9 +150,6 @@ async function handleChat(
         throw err;
       }
     }
-
-    // 5. Get previous model for conversation coherence
-    const previousModelUsed = await getPreviousModelId(conversationId);
 
     // 6. Detect available providers and call ADE
     const availableProviders = getAvailableProviders();
