@@ -8,6 +8,7 @@ import type { AravielMeta } from "@/lib/stream/meta-parser";
 import {
   isGreetingInterceptEnabled,
   classifyGreeting,
+  shouldInterceptCategory,
   generateGreetingResponse,
   GREETING_MODEL_INFO,
   createGreetingAnalysis,
@@ -162,7 +163,9 @@ async function handleChat(
     // 5b. Greeting intercept — skip ADE + provider for pure greetings
     if (isGreetingInterceptEnabled()) {
       const greetingCategory = classifyGreeting(chatReq.message);
-      if (greetingCategory) {
+      const isFirstMessage = history.length <= 1; // only the user message we just saved
+      const shouldIntercept = greetingCategory && shouldInterceptCategory(greetingCategory, isFirstMessage);
+      if (shouldIntercept) {
         const startMs = Date.now();
         const greetingContent = generateGreetingResponse(greetingCategory);
         const greetingMessageId = randomUUID();
