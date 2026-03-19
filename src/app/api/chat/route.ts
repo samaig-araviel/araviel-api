@@ -5,6 +5,14 @@ import { getProvider, getAvailableProviders } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
 import type { AravielMeta } from "@/lib/stream/meta-parser";
+import {
+  isGreetingInterceptEnabled,
+  classifyGreeting,
+  generateGreetingResponse,
+  GREETING_MODEL_INFO,
+  createGreetingAnalysis,
+  ZERO_USAGE,
+} from "@/lib/greeting";
 import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
@@ -148,6 +156,80 @@ async function handleChat(
           return;
         }
         throw err;
+      }
+    }
+
+    // 5b. Greeting intercept — skip ADE + provider for pure greetings
+    if (isGreetingInterceptEnabled()) {
+      const greetingCategory = classifyGreeting(chatReq.message);
+      if (greetingCategory) {
+        const startMs = Date.now();
+        const greetingContent = generateGreetingResponse(greetingCategory);
+        const greetingMessageId = randomUUID();
+        const greetingModel = GREETING_MODEL_INFO;
+        const greetingAnalysis = createGreetingAnalysis(greetingCategory);
+
+        // Send routing event (same shape as normal flow)
+        await sendSSE(writer, encoder, {
+          type: "routing",
+          data: {
+            conversationId,
+            subConversationId: subConversationId ?? null,
+            messageId: greetingMessageId,
+            model: greetingModel,
+            backupModels: [],
+            analysis: greetingAnalysis,
+            confidence: 1.0,
+            adeLatencyMs: 0,
+            isManualSelection: false,
+            upgradeHint: null,
+            providerHint: null,
+            webSearchUsed: false,
+            webSearchAutoDetected: false,
+          },
+        });
+
+        // Stream the response as delta (same as provider would)
+        await sendSSE(writer, encoder, {
+          type: "delta",
+          data: { content: greetingContent },
+        });
+
+        // Persist assistant message to DB
+        const greetingLatencyMs = Date.now() - startMs;
+        await insertAssistantMessage(greetingMessageId, conversationId, {
+          content: greetingContent,
+          modelUsed: {
+            model: greetingModel,
+            backupModels: [],
+            analysis: greetingAnalysis,
+            webSearchUsed: false,
+          },
+          usage: ZERO_USAGE,
+          costUsd: 0,
+          latencyMs: greetingLatencyMs,
+          adeLatencyMs: 0,
+          extendedData: {},
+          subConversationId,
+        });
+
+        await updateConversationTimestamp(conversationId);
+
+        // Send done event
+        await sendSSE(writer, encoder, {
+          type: "done",
+          data: {
+            messageId: greetingMessageId,
+            conversationId,
+            subConversationId: subConversationId ?? null,
+            usage: { ...ZERO_USAGE, costUsd: 0 },
+            latencyMs: greetingLatencyMs,
+            adeLatencyMs: 0,
+          },
+        });
+
+        await writer.close();
+        return;
       }
     }
 
