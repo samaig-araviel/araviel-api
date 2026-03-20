@@ -115,11 +115,14 @@ async function handleChat(
     // 3-5. Run independent DB operations in parallel:
     //   - Save user message (write, doesn't block reads)
     //   - Fetch conversation history (read)
-    //   - Get previous model for conversation coherence (read)
+    //   - Get previous model for conversation coherence (read, non-critical)
     const [, fetchedHistory, previousModelUsed] = await Promise.all([
       saveUserMessage(conversationId, chatReq.message, subConversationId),
       fetchConversationHistory(conversationId, subConversationId),
-      getPreviousModelId(conversationId),
+      getPreviousModelId(conversationId).catch((err) => {
+        console.warn("[chat] getPreviousModelId failed (non-critical):", err instanceof Error ? err.message : err);
+        return undefined;
+      }),
     ]);
 
     let history = fetchedHistory;
@@ -198,27 +201,30 @@ async function handleChat(
           data: { content: greetingContent },
         });
 
-        // Persist assistant message to DB
+        // Persist to DB (non-blocking for the user — if DB fails, response is already sent)
         const greetingLatencyMs = Date.now() - startMs;
-        await insertAssistantMessage(greetingMessageId, conversationId, {
-          content: greetingContent,
-          modelUsed: {
-            model: greetingModel,
-            backupModels: [],
-            analysis: greetingAnalysis,
-            webSearchUsed: false,
-          },
-          usage: ZERO_USAGE,
-          costUsd: 0,
-          latencyMs: greetingLatencyMs,
-          adeLatencyMs: 0,
-          extendedData: {},
-          subConversationId,
-        });
+        try {
+          await insertAssistantMessage(greetingMessageId, conversationId, {
+            content: greetingContent,
+            modelUsed: {
+              model: greetingModel,
+              backupModels: [],
+              analysis: greetingAnalysis,
+              webSearchUsed: false,
+            },
+            usage: ZERO_USAGE,
+            costUsd: 0,
+            latencyMs: greetingLatencyMs,
+            adeLatencyMs: 0,
+            extendedData: {},
+            subConversationId,
+          });
+          await updateConversationTimestamp(conversationId);
+        } catch (dbErr) {
+          console.error("[greeting] DB save failed (response still sent):", dbErr instanceof Error ? dbErr.message : dbErr);
+        }
 
-        await updateConversationTimestamp(conversationId);
-
-        // Send done event
+        // Always send done event even if DB save failed
         await sendSSE(writer, encoder, {
           type: "done",
           data: {
@@ -910,14 +916,31 @@ async function handleChat(
       );
     }
   } catch (err) {
-    await sendSSE(writer, encoder, {
-      type: "error",
-      data: {
-        message: err instanceof Error ? err.message : "Internal server error",
-        code: "INTERNAL_ERROR",
-      },
-    });
-    await writer.close();
+    const rawMessage = err instanceof Error ? err.message : "Internal server error";
+    // Map known error patterns to user-friendly messages
+    let userMessage = rawMessage;
+    let code = "INTERNAL_ERROR";
+    if (rawMessage.includes("ADE request failed") || rawMessage.includes("ADE request timed out")) {
+      userMessage = "The routing engine is temporarily unavailable. Please try again.";
+      code = "ADE_UNAVAILABLE";
+    } else if (rawMessage.includes("Failed to create conversation") || rawMessage.includes("Failed to save user message")) {
+      userMessage = "Unable to save your message. Please try again.";
+      code = "DB_ERROR";
+    }
+    console.error(`[chat] Fatal error: ${rawMessage}`);
+    try {
+      await sendSSE(writer, encoder, {
+        type: "error",
+        data: { message: userMessage, code },
+      });
+    } catch {
+      // Writer may already be closed
+    }
+    try {
+      await writer.close();
+    } catch {
+      // Already closed
+    }
   }
 }
 
