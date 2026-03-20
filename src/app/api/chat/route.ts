@@ -103,12 +103,11 @@ async function handleChat(
       );
     }
 
-    // 3-5. Run independent DB operations in parallel:
-    //   - Save user message (write, doesn't block reads)
-    //   - Fetch conversation history (read)
-    //   - Get previous model for conversation coherence (read, non-critical)
-    const [, fetchedHistory, previousModelUsed] = await Promise.all([
-      saveUserMessage(conversationId, chatReq.message, subConversationId),
+    // 3. Save user message first (must complete before fetching history)
+    await saveUserMessage(conversationId, chatReq.message, subConversationId);
+
+    // 4-5. Fetch history and previous model in parallel (both are reads)
+    const [fetchedHistory, previousModelUsed] = await Promise.all([
       fetchConversationHistory(conversationId, subConversationId),
       getPreviousModelId(conversationId).catch((err) => {
         console.warn("[chat] getPreviousModelId failed (non-critical):", err instanceof Error ? err.message : err);
@@ -697,8 +696,7 @@ async function handleChat(
     }
 
     // Path B: Chat models (with optional native image gen)
-    // Try primary model with 1 retry for cold-start resilience
-    let streamResult = await streamFromProvider(
+    const streamResult = await streamFromProvider(
       model,
       systemPrompt,
       history,
@@ -714,27 +712,7 @@ async function handleChat(
       pendingImages
     );
 
-    if (!streamResult.success) {
-      // Single retry after short delay — handles provider cold-start failures
-      await new Promise((r) => setTimeout(r, 2000));
-      streamResult = await streamFromProvider(
-        model,
-        systemPrompt,
-        history,
-        enableWebSearch,
-        enableThinking,
-        enableImageGeneration,
-        chatReq.message,
-        writer,
-        encoder,
-        apiCallLogs,
-        conversationId,
-        messageId,
-        pendingImages
-      );
-    }
-
-    // 13. If primary failed (after retry), try backup
+    // 13. If primary failed, try backup
     if (!streamResult.success) {
       const backup = findSupportedBackup(backupModels);
 
