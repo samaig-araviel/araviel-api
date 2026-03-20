@@ -697,7 +697,8 @@ async function handleChat(
     }
 
     // Path B: Chat models (with optional native image gen)
-    const streamResult = await streamFromProvider(
+    // Try primary model with 1 retry for cold-start resilience
+    let streamResult = await streamFromProvider(
       model,
       systemPrompt,
       history,
@@ -713,7 +714,27 @@ async function handleChat(
       pendingImages
     );
 
-    // 13. If primary failed, try backup
+    if (!streamResult.success) {
+      // Single retry after short delay — handles provider cold-start failures
+      await new Promise((r) => setTimeout(r, 2000));
+      streamResult = await streamFromProvider(
+        model,
+        systemPrompt,
+        history,
+        enableWebSearch,
+        enableThinking,
+        enableImageGeneration,
+        chatReq.message,
+        writer,
+        encoder,
+        apiCallLogs,
+        conversationId,
+        messageId,
+        pendingImages
+      );
+    }
+
+    // 13. If primary failed (after retry), try backup
     if (!streamResult.success) {
       const backup = findSupportedBackup(backupModels);
 
@@ -761,7 +782,7 @@ async function handleChat(
           await sendSSE(writer, encoder, {
             type: "error",
             data: {
-              message: "Both primary and backup models failed. Please try again.",
+              message: `Both primary and backup models failed. ${backupResult.error || 'Please try again.'}`,
               code: "ALL_PROVIDERS_FAILED",
             },
           });
