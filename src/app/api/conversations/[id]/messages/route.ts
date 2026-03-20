@@ -25,7 +25,6 @@ interface FormattedMessage {
   adeLatencyMs?: number | null;
   followUps?: string[] | null;
   questions?: FollowUpQuestion[] | null;
-  thinkingDurationMs?: number | null;
 }
 
 function formatMessage(msg: DBMessage): FormattedMessage {
@@ -49,7 +48,6 @@ function formatMessage(msg: DBMessage): FormattedMessage {
 
   const extendedData = msg.extended_data as {
     thinkingContent?: string;
-    thinkingDurationMs?: number;
     citations?: Citation[];
     followUps?: string[];
     questions?: FollowUpQuestion[];
@@ -75,7 +73,6 @@ function formatMessage(msg: DBMessage): FormattedMessage {
     adeLatencyMs: msg.ade_latency_ms,
     followUps: extendedData?.followUps ?? null,
     questions: extendedData?.questions ?? null,
-    thinkingDurationMs: extendedData?.thinkingDurationMs ?? null,
   };
 }
 

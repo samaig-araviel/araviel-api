@@ -178,8 +178,6 @@ export interface SSEDoneData {
   usage: TokenUsage;
   latencyMs: number;
   adeLatencyMs: number;
-  /** Wall-clock ms the model spent in thinking/reasoning phase (0 if no thinking). */
-  thinkingDurationMs: number;
 }
 
 export interface StreamEvent {
