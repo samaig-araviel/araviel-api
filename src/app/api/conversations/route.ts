@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export async function OPTIONS(request: NextRequest) {
@@ -8,6 +10,16 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(request.headers.get("origin")) });
+    }
+    throw err;
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
@@ -22,12 +34,14 @@ export async function GET(request: NextRequest) {
     let dataQuery = supabase
       .from("conversations")
       .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
+      .eq("user_id", user.id)
       .order("updated_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
     let countQuery = supabase
       .from("conversations")
-      .select("id", { count: "exact", head: true });
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
 
     if (projectId) {
       dataQuery = dataQuery.eq("project_id", projectId);
@@ -82,6 +96,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(request.headers.get("origin")) });
+    }
+    throw err;
+  }
+
   try {
     const body = await request.json().catch(() => ({}));
     const title = typeof body.title === "string" && body.title.trim()
@@ -95,6 +119,7 @@ export async function POST(request: NextRequest) {
     const { error } = await supabase.from("conversations").insert({
       id,
       title,
+      user_id: user.id,
       created_at: now,
       updated_at: now,
     });

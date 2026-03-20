@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 import {
   bulkImport,
@@ -20,6 +22,16 @@ export async function OPTIONS(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
+
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
 
   try {
     const raw = await request.json().catch(() => null);
@@ -63,7 +75,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await bulkImport(conversations);
+    const result = await bulkImport(conversations, user.id);
 
     return NextResponse.json(result, {
       status: 201,
@@ -83,6 +95,16 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider") || undefined;
@@ -101,6 +123,7 @@ export async function GET(request: NextRequest) {
       provider,
       archived,
       starred,
+      userId: user.id,
     });
 
     return NextResponse.json(

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../cors";
 import { bulkUpdate, bulkSoftDelete } from "@/lib/imported-conversations";
 
@@ -11,6 +13,16 @@ export async function OPTIONS(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   const origin = request.headers.get("origin");
+
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
 
   try {
     const body = await request.json().catch(() => null);
@@ -37,7 +49,7 @@ export async function PATCH(request: NextRequest) {
       updates.isArchived = body.updates.isArchived;
     }
 
-    const updated = await bulkUpdate(body.ids, updates);
+    const updated = await bulkUpdate(body.ids, updates, user.id);
 
     return NextResponse.json({ updated }, { headers: corsHeaders(origin) });
   } catch (err) {
@@ -54,6 +66,16 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const body = await request.json().catch(() => null);
 
@@ -64,7 +86,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const deleted = await bulkSoftDelete(body.ids);
+    const deleted = await bulkSoftDelete(body.ids, user.id);
 
     return NextResponse.json({ deleted }, { headers: corsHeaders(origin) });
   } catch (err) {

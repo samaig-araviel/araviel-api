@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../cors";
 
 export async function OPTIONS(request: NextRequest) {
@@ -11,6 +13,16 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const origin = request.headers.get("origin");
+
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
 
   try {
     const { id } = await params;
@@ -39,6 +51,7 @@ export async function PATCH(
       .from("projects")
       .update(updates)
       .eq("id", id)
+      .eq("user_id", user.id)
       .select()
       .single();
 
@@ -68,9 +81,34 @@ export async function DELETE(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { id } = await params;
     const supabase = getSupabase();
+
+    // Verify project ownership
+    const { data: owned, error: ownErr } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (ownErr || !owned) {
+      return NextResponse.json(
+        { error: "Project not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
     const deleteConversations =
       request.nextUrl.searchParams.get("deleteConversations") === "true";
 

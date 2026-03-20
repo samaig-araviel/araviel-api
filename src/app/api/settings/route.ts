@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 const DEFAULT_SETTINGS = {
@@ -73,16 +75,18 @@ export async function OPTIONS() {
 }
 
 /**
- * GET /api/settings?userId=...
+ * GET /api/settings
  * Returns the user's settings, falling back to defaults if none exist.
  */
 export async function GET(request: NextRequest) {
-  const userId = request.nextUrl.searchParams.get("userId");
-  if (!userId) {
-    return NextResponse.json(
-      { error: "userId is required" },
-      { status: 400, headers: corsHeaders() }
-    );
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+    }
+    throw err;
   }
 
   try {
@@ -90,7 +94,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("user_settings")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .maybeSingle();
 
     if (error) {
@@ -102,7 +106,7 @@ export async function GET(request: NextRequest) {
 
     const settings = data
       ? { ...DEFAULT_SETTINGS, ...data }
-      : { ...DEFAULT_SETTINGS, user_id: userId };
+      : { ...DEFAULT_SETTINGS, user_id: user.id };
 
     return NextResponse.json({ settings }, { headers: corsHeaders() });
   } catch (err) {
@@ -115,23 +119,33 @@ export async function GET(request: NextRequest) {
 
 /**
  * PUT /api/settings
- * Body: { userId: string, settings: { ...partial settings } }
+ * Body: { settings: { ...partial settings } }
  * Upserts the user's settings.
  */
 export async function PUT(request: NextRequest) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+    }
+    throw err;
+  }
+
   try {
     const body = await request.json();
-    const { userId, settings } = body;
+    const { settings } = body;
 
-    if (!userId || !settings) {
+    if (!settings) {
       return NextResponse.json(
-        { error: "userId and settings are required" },
+        { error: "settings are required" },
         { status: 400, headers: corsHeaders() }
       );
     }
 
     const snakeSettings = toSnakeCase(settings);
-    const row = { user_id: userId, ...snakeSettings };
+    const row = { user_id: user.id, ...snakeSettings };
 
     const supabase = getSupabase();
     const { data, error } = await supabase

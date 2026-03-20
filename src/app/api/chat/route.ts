@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { callADE } from "@/lib/ade";
 import { calculateCost } from "@/lib/cost";
 import { getProvider, getAvailableProviders } from "@/lib/providers";
@@ -34,6 +34,8 @@ import {
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits } from "@/lib/credits";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
@@ -44,6 +46,16 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: NextRequest) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+    }
+    throw err;
+  }
+
   const { stream, writer, encoder } = createSSEStream();
 
   const response = new Response(stream, {
@@ -55,7 +67,7 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  handleChat(request, writer, encoder).catch(async (err) => {
+  handleChat(request, writer, encoder, user).catch(async (err) => {
     const errorEvent: StreamEvent = {
       type: "error",
       data: {
@@ -81,7 +93,8 @@ export async function POST(request: NextRequest) {
 async function handleChat(
   request: NextRequest,
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  encoder: TextEncoder
+  encoder: TextEncoder,
+  user: AuthenticatedUser
 ): Promise<void> {
   try {
     // 1. Parse and validate
@@ -99,7 +112,8 @@ async function handleChat(
       conversationId = await getOrCreateConversation(
         chatReq.conversationId,
         chatReq.message,
-        chatReq.projectId
+        chatReq.projectId,
+        user.id
       );
     }
 
@@ -121,7 +135,8 @@ async function handleChat(
     if (chatReq.importedConversationId) {
       try {
         const importedMessages = await fetchImportedConversationHistory(
-          chatReq.importedConversationId
+          chatReq.importedConversationId,
+          user.id
         );
 
         if (importedMessages.length > 0) {
@@ -276,8 +291,8 @@ async function handleChat(
 
     // 13b. Credit check for image generation
     const imageQuality = chatReq.imageQuality ?? "standard";
-    if (enableImageGeneration && chatReq.userId) {
-      const creditCheck = await canGenerate(chatReq.userId, imageQuality);
+    if (enableImageGeneration && user.id) {
+      const creditCheck = await canGenerate(user.id, imageQuality);
       if (!creditCheck.allowed) {
         await sendSSE(writer, encoder, {
           type: "error",
@@ -301,7 +316,7 @@ async function handleChat(
     const apiCallLogs: ApiCallLogEntry[] = [];
     const pendingImages: PendingImageMeta[] = [];
     const creditInfo = {
-      userId: chatReq.userId,
+      userId: user.id,
       imageQuality: imageQuality,
       wasImageGeneration: enableImageGeneration,
     };

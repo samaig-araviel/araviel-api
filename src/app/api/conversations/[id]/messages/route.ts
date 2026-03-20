@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import type { DBMessage, Citation, ModelInfo, FollowUpQuestion } from "@/lib/types";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
 
@@ -84,6 +86,16 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(request.headers.get("origin")) });
+    }
+    throw err;
+  }
+
   try {
     const { id: conversationId } = await params;
     const { searchParams } = new URL(request.url);
@@ -92,11 +104,12 @@ export async function GET(
 
     const supabase = getSupabase();
 
-    // Verify conversation exists
+    // Verify conversation exists and belongs to user
     const { data: conv, error: convError } = await supabase
       .from("conversations")
       .select("id")
       .eq("id", conversationId)
+      .eq("user_id", user.id)
       .single();
 
     if (convError || !conv) {

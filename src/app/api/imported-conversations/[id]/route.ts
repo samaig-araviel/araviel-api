@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../cors";
 import { updateConversation, softDelete } from "@/lib/imported-conversations";
 
@@ -14,6 +16,16 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const origin = request.headers.get("origin");
+
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
 
   try {
     const { id } = await params;
@@ -36,7 +48,7 @@ export async function PATCH(
     if (body.isStarred !== undefined) updates.isStarred = body.isStarred;
     if (body.isArchived !== undefined) updates.isArchived = body.isArchived;
 
-    const conversation = await updateConversation(id, updates);
+    const conversation = await updateConversation(id, updates, user.id);
 
     return NextResponse.json(conversation, {
       headers: corsHeaders(origin),
@@ -62,9 +74,19 @@ export async function DELETE(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { id } = await params;
-    await softDelete(id);
+    await softDelete(id, user.id);
 
     return NextResponse.json(
       { success: true },

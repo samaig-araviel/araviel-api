@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
 
 const VALID_REASONS = ["harmful", "inaccurate", "inappropriate", "other"] as const;
@@ -14,8 +16,47 @@ export async function POST(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { subId } = await params;
+
+    // Verify ownership via parent conversation
+    const supabaseCheck = getSupabase();
+    const { data: subConv, error: subErr } = await supabaseCheck
+      .from("sub_conversations")
+      .select("conversation_id")
+      .eq("id", subId)
+      .single();
+
+    if (subErr || !subConv) {
+      return NextResponse.json(
+        { error: "Sub-conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
+
+    const { data: conv, error: convErr } = await supabaseCheck
+      .from("conversations")
+      .select("id")
+      .eq("id", subConv.conversation_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (convErr || !conv) {
+      return NextResponse.json(
+        { error: "Sub-conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
     const body = await request.json().catch(() => null);
 
     if (!body || typeof body !== "object") {
