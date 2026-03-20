@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { callADE } from "@/lib/ade";
 import { calculateCost } from "@/lib/cost";
 import { getProvider, getAvailableProviders } from "@/lib/providers";
+import type { ProviderStreamEvent } from "@/lib/providers/base";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
 import type { AravielMeta } from "@/lib/stream/meta-parser";
@@ -802,6 +803,9 @@ async function handleChat(
 
     // 13. If primary failed, try backup
     if (!streamResult.success) {
+      console.error(
+        `[chat] Primary model failed: provider=${model.provider} model=${model.id} error="${streamResult.error}" latency=${streamResult.latencyMs}ms`
+      );
       const backup = findSupportedBackup(backupModels);
 
       if (backup) {
@@ -845,6 +849,9 @@ async function handleChat(
               return;
             }
           }
+          console.error(
+            `[chat] ALL PROVIDERS FAILED: primary=${model.provider}/${model.id} error="${streamResult.error}" | backup=${backup.provider}/${backup.id} error="${backupResult.error}"`
+          );
           await sendSSE(writer, encoder, {
             type: "error",
             data: {
@@ -1112,7 +1119,12 @@ async function streamFromProvider(
     }
 
     const provider = getProvider(model.provider as SupportedProvider);
-    const providerStream = provider.stream({
+
+    // Attempt to create the stream with one internal retry for transient/cold-start errors.
+    // The first call on a cold function invocation can fail due to connection pool warmup,
+    // TCP/TLS handshake delays, or transient provider errors.
+    let providerStream: AsyncGenerator<ProviderStreamEvent>;
+    const streamConfig = {
       modelId: model.id,
       systemPrompt,
       messages: history.map((m) => ({
@@ -1122,7 +1134,32 @@ async function streamFromProvider(
       enableThinking,
       enableWebSearch,
       enableImageGeneration,
-    });
+    };
+
+    try {
+      providerStream = provider.stream(streamConfig);
+      // Force the async generator to initialize by requesting the first value.
+      // Wrap in a race with a 30s timeout to prevent hanging.
+      const first = await Promise.race([
+        providerStream.next(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Provider stream init timeout (30s)")), 30000)
+        ),
+      ]);
+      // Re-wrap so the consumer sees the first value too
+      providerStream = (async function* () {
+        if (!first.done) yield first.value;
+        yield* providerStream;
+      })();
+    } catch (initErr) {
+      const initMsg = initErr instanceof Error ? initErr.message : String(initErr);
+      console.warn(
+        `[chat] Provider stream init failed (will retry once): provider=${model.provider} model=${model.id} error="${initMsg}"`
+      );
+      // Brief pause before retry
+      await new Promise((r) => setTimeout(r, 1000));
+      providerStream = provider.stream(streamConfig);
+    }
 
     // Tail buffer to prevent <araviel_meta> block from flashing in the UI.
     // We hold back content once we detect a potential partial meta tag.
@@ -1298,6 +1335,11 @@ async function streamFromProvider(
   } catch (err) {
     const latencyMs = Date.now() - start;
     const errorMessage = err instanceof Error ? err.message : "Unknown provider error";
+
+    console.error(
+      `[chat] streamFromProvider FAILED: provider=${model.provider} model=${model.id} latency=${latencyMs}ms error="${errorMessage}"`,
+      err instanceof Error ? err.stack : err
+    );
 
     apiCallLogs.push({
       provider: model.provider,
