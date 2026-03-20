@@ -8,6 +8,8 @@ import {
   IMAGE_QUALITY_COSTS,
   TIER_MONTHLY_CREDITS,
 } from "@/lib/credits";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export async function OPTIONS() {
@@ -15,20 +17,22 @@ export async function OPTIONS() {
 }
 
 /**
- * GET /api/credits?userId=...
+ * GET /api/credits
  * Returns the user's credit balance.
  */
 export async function GET(request: NextRequest) {
-  const userId = request.nextUrl.searchParams.get("userId");
-  if (!userId) {
-    return NextResponse.json(
-      { error: "userId is required" },
-      { status: 400, headers: corsHeaders() }
-    );
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+    }
+    throw err;
   }
 
   try {
-    const balance = await getBalance(userId);
+    const balance = await getBalance(user.id);
     return NextResponse.json(
       {
         balance,
@@ -51,13 +55,23 @@ export async function GET(request: NextRequest) {
  * Actions: "check", "buy-pack", "update-tier"
  */
 export async function POST(request: NextRequest) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+    }
+    throw err;
+  }
+
   try {
     const body = await request.json();
-    const { action, userId } = body;
+    const { action } = body;
 
-    if (!userId || !action) {
+    if (!action) {
       return NextResponse.json(
-        { error: "userId and action are required" },
+        { error: "action is required" },
         { status: 400, headers: corsHeaders() }
       );
     }
@@ -65,7 +79,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case "check": {
         const quality = body.quality ?? "standard";
-        const result = await canGenerate(userId, quality);
+        const result = await canGenerate(user.id, quality);
         return NextResponse.json(result, { headers: corsHeaders() });
       }
 
@@ -77,8 +91,8 @@ export async function POST(request: NextRequest) {
             { status: 400, headers: corsHeaders() }
           );
         }
-        const result = await addPack(userId, packType);
-        const balance = await getBalance(userId);
+        const result = await addPack(user.id, packType);
+        const balance = await getBalance(user.id);
         return NextResponse.json({ ...result, balance }, { headers: corsHeaders() });
       }
 
@@ -90,8 +104,8 @@ export async function POST(request: NextRequest) {
             { status: 400, headers: corsHeaders() }
           );
         }
-        await updateTier(userId, tier);
-        const balance = await getBalance(userId);
+        await updateTier(user.id, tier);
+        const balance = await getBalance(user.id);
         return NextResponse.json({ tier, balance }, { headers: corsHeaders() });
       }
 

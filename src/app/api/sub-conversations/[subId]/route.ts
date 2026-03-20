@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../cors";
 
 export async function OPTIONS(request: NextRequest) {
@@ -12,9 +14,47 @@ export async function DELETE(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { subId } = await params;
     const supabase = getSupabase();
+
+    // Verify ownership via parent conversation
+    const { data: subConv, error: subErr } = await supabase
+      .from("sub_conversations")
+      .select("conversation_id")
+      .eq("id", subId)
+      .single();
+
+    if (subErr || !subConv) {
+      return NextResponse.json(
+        { error: "Sub-conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
+
+    const { data: conv, error: convErr } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("id", subConv.conversation_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (convErr || !conv) {
+      return NextResponse.json(
+        { error: "Sub-conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
 
     // 1. Delete messages belonging to this sub-conversation
     await supabase
@@ -53,8 +93,47 @@ export async function PATCH(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { subId } = await params;
+
+    // Verify ownership via parent conversation
+    const supabaseCheck = getSupabase();
+    const { data: subConvCheck, error: subCheckErr } = await supabaseCheck
+      .from("sub_conversations")
+      .select("conversation_id")
+      .eq("id", subId)
+      .single();
+
+    if (subCheckErr || !subConvCheck) {
+      return NextResponse.json(
+        { error: "Sub-conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
+
+    const { data: convCheck, error: convCheckErr } = await supabaseCheck
+      .from("conversations")
+      .select("id")
+      .eq("id", subConvCheck.conversation_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (convCheckErr || !convCheck) {
+      return NextResponse.json(
+        { error: "Sub-conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
     const body = await request.json().catch(() => null);
 
     if (!body || typeof body !== "object") {

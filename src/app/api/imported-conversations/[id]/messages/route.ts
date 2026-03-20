@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
 import { getMessages } from "@/lib/imported-conversations";
 
@@ -15,9 +17,19 @@ export async function GET(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { id } = await params;
-    const messages = await getMessages(id);
+    const messages = await getMessages(id, user.id);
 
     return NextResponse.json({ messages }, { headers: corsHeaders(origin) });
   } catch (err) {

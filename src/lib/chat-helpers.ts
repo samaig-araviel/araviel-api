@@ -61,16 +61,23 @@ export function validateChatRequest(body: unknown): ChatRequest {
 export async function getOrCreateConversation(
   conversationId: string | undefined,
   messagePreview: string,
-  projectId?: string
+  projectId?: string,
+  userId?: string
 ): Promise<string> {
   const supabase = getSupabase();
 
   if (conversationId) {
-    const { data, error } = await supabase
+    // Verify conversation exists and belongs to the user
+    let query = supabase
       .from("conversations")
       .select("id")
-      .eq("id", conversationId)
-      .single();
+      .eq("id", conversationId);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query.single();
 
     if (error || !data) {
       throw new Error(`Conversation not found: ${conversationId}`);
@@ -91,6 +98,10 @@ export async function getOrCreateConversation(
 
   if (projectId) {
     row.project_id = projectId;
+  }
+
+  if (userId) {
+    row.user_id = userId;
   }
 
   const { error } = await supabase.from("conversations").insert(row);
@@ -290,9 +301,10 @@ export async function fetchConversationHistory(
  * ConversationMessage format suitable for prepending to native history.
  */
 export async function fetchImportedConversationHistory(
-  importedConversationId: string
+  importedConversationId: string,
+  userId: string
 ): Promise<ConversationMessage[]> {
-  const messages = await getImportedMessages(importedConversationId);
+  const messages = await getImportedMessages(importedConversationId, userId);
 
   return messages
     .filter((m) => m.role === "user" || m.role === "assistant")

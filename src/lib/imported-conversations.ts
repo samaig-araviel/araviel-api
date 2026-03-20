@@ -120,7 +120,8 @@ const CONVERSATION_COLUMNS =
  * Duplicates (by provider+external_id) are skipped gracefully.
  */
 export async function bulkImport(
-  conversations: ImportConversationInput[]
+  conversations: ImportConversationInput[],
+  userId: string
 ): Promise<{
   imported: number;
   skipped: number;
@@ -139,6 +140,7 @@ export async function bulkImport(
     const { data: existing } = await supabase
       .from("imported_conversations")
       .select("provider, external_id")
+      .eq("user_id", userId)
       .not("external_id", "is", null)
       .in("external_id", externalIds);
 
@@ -169,6 +171,7 @@ export async function bulkImport(
 
     const convRow = {
       id: convId,
+      user_id: userId,
       provider: conv.provider.trim(),
       provider_name: conv.providerName.trim(),
       external_id: conv.externalId?.trim() || null,
@@ -232,13 +235,15 @@ export async function listConversations(filters: {
   provider?: string;
   archived?: boolean;
   starred?: boolean;
+  userId: string;
 }): Promise<ImportedConversationResponse[]> {
   const supabase = getSupabase();
-  const { archived = false, provider, starred } = filters;
+  const { archived = false, provider, starred, userId } = filters;
 
   let query = supabase
     .from("imported_conversations")
     .select(CONVERSATION_COLUMNS)
+    .eq("user_id", userId)
     .is("deleted_at", null)
     .eq("is_archived", archived)
     .order("created_at", { ascending: false });
@@ -265,15 +270,17 @@ export async function listConversations(filters: {
  * Get decrypted messages for a single imported conversation.
  */
 export async function getMessages(
-  conversationId: string
+  conversationId: string,
+  userId: string
 ): Promise<ImportedMessage[]> {
   const supabase = getSupabase();
 
-  // Verify conversation exists and is not soft-deleted
+  // Verify conversation exists, belongs to user, and is not soft-deleted
   const { data: conv, error: convError } = await supabase
     .from("imported_conversations")
     .select("id")
     .eq("id", conversationId)
+    .eq("user_id", userId)
     .is("deleted_at", null)
     .single();
 
@@ -304,7 +311,8 @@ export async function getMessages(
  */
 export async function updateConversation(
   conversationId: string,
-  updates: { title?: string; isStarred?: boolean; isArchived?: boolean }
+  updates: { title?: string; isStarred?: boolean; isArchived?: boolean },
+  userId: string
 ): Promise<ImportedConversationResponse> {
   const supabase = getSupabase();
 
@@ -329,6 +337,7 @@ export async function updateConversation(
     .from("imported_conversations")
     .update(updatePayload)
     .eq("id", conversationId)
+    .eq("user_id", userId)
     .is("deleted_at", null)
     .select(CONVERSATION_COLUMNS)
     .single();
@@ -347,7 +356,8 @@ export async function updateConversation(
  */
 export async function bulkUpdate(
   ids: string[],
-  updates: { isStarred?: boolean; isArchived?: boolean }
+  updates: { isStarred?: boolean; isArchived?: boolean },
+  userId: string
 ): Promise<number> {
   const supabase = getSupabase();
 
@@ -366,6 +376,7 @@ export async function bulkUpdate(
     .from("imported_conversations")
     .update(updatePayload)
     .in("id", ids)
+    .eq("user_id", userId)
     .is("deleted_at", null)
     .select("id");
 
@@ -379,13 +390,14 @@ export async function bulkUpdate(
 /**
  * Soft-delete a single imported conversation.
  */
-export async function softDelete(conversationId: string): Promise<void> {
+export async function softDelete(conversationId: string, userId: string): Promise<void> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from("imported_conversations")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", conversationId)
+    .eq("user_id", userId)
     .is("deleted_at", null)
     .select("id")
     .single();
@@ -400,13 +412,14 @@ export async function softDelete(conversationId: string): Promise<void> {
 /**
  * Bulk soft-delete imported conversations.
  */
-export async function bulkSoftDelete(ids: string[]): Promise<number> {
+export async function bulkSoftDelete(ids: string[], userId: string): Promise<number> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from("imported_conversations")
     .update({ deleted_at: new Date().toISOString() })
     .in("id", ids)
+    .eq("user_id", userId)
     .is("deleted_at", null)
     .select("id");
 

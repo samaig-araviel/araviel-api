@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { authenticateRequest, AuthError } from "@/lib/auth";
+import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../../cors";
 
 export async function OPTIONS(request: NextRequest) {
@@ -10,6 +12,16 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(request.headers.get("origin")) });
+    }
+    throw err;
+  }
+
   try {
     const { id } = await params;
     const supabase = getSupabase();
@@ -18,6 +30,7 @@ export async function GET(
       .from("conversations")
       .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .eq("id", id)
+      .eq("user_id", user.id)
       .single();
 
     if (error || !data) {
@@ -54,6 +67,16 @@ export async function PATCH(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { id } = await params;
     const body = await request.json().catch(() => null);
@@ -87,6 +110,7 @@ export async function PATCH(
       .from("conversations")
       .update(updates)
       .eq("id", id)
+      .eq("user_id", user.id)
       .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .single();
 
@@ -125,9 +149,34 @@ export async function DELETE(
 ) {
   const origin = request.headers.get("origin");
 
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
   try {
     const { id } = await params;
     const supabase = getSupabase();
+
+    // Verify ownership before deleting
+    const { data: owned, error: ownErr } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (ownErr || !owned) {
+      return NextResponse.json(
+        { error: "Conversation not found" },
+        { status: 404, headers: corsHeaders(origin) }
+      );
+    }
 
     // Delete sub-conversation messages, sub-conversations, then messages, then conversation
     // 1. Find all sub-conversations for this conversation
