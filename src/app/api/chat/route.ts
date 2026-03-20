@@ -5,15 +5,6 @@ import { getProvider, getAvailableProviders } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
 import type { AravielMeta } from "@/lib/stream/meta-parser";
-import {
-  isGreetingInterceptEnabled,
-  classifyGreeting,
-  shouldInterceptCategory,
-  generateGreetingResponse,
-  GREETING_MODEL_INFO,
-  createGreetingAnalysis,
-  ZERO_USAGE,
-} from "@/lib/greeting";
 import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
@@ -160,85 +151,6 @@ async function handleChat(
           return;
         }
         throw err;
-      }
-    }
-
-    // 5b. Greeting intercept — skip ADE + provider for pure greetings
-    if (isGreetingInterceptEnabled()) {
-      const greetingCategory = classifyGreeting(chatReq.message);
-      const isFirstMessage = history.length <= 1; // only the user message we just saved
-      const shouldIntercept = greetingCategory && shouldInterceptCategory(greetingCategory, isFirstMessage);
-      if (shouldIntercept) {
-        const startMs = Date.now();
-        const greetingContent = generateGreetingResponse(greetingCategory);
-        const greetingMessageId = randomUUID();
-        const greetingModel = GREETING_MODEL_INFO;
-        const greetingAnalysis = createGreetingAnalysis(greetingCategory);
-
-        // Send routing event (same shape as normal flow)
-        await sendSSE(writer, encoder, {
-          type: "routing",
-          data: {
-            conversationId,
-            subConversationId: subConversationId ?? null,
-            messageId: greetingMessageId,
-            model: greetingModel,
-            backupModels: [],
-            analysis: greetingAnalysis,
-            confidence: 1.0,
-            adeLatencyMs: 0,
-            isManualSelection: false,
-            upgradeHint: null,
-            providerHint: null,
-            webSearchUsed: false,
-            webSearchAutoDetected: false,
-          },
-        });
-
-        // Stream the response as delta (same as provider would)
-        await sendSSE(writer, encoder, {
-          type: "delta",
-          data: { content: greetingContent },
-        });
-
-        // Persist to DB (non-blocking for the user — if DB fails, response is already sent)
-        const greetingLatencyMs = Date.now() - startMs;
-        try {
-          await insertAssistantMessage(greetingMessageId, conversationId, {
-            content: greetingContent,
-            modelUsed: {
-              model: greetingModel,
-              backupModels: [],
-              analysis: greetingAnalysis,
-              webSearchUsed: false,
-            },
-            usage: ZERO_USAGE,
-            costUsd: 0,
-            latencyMs: greetingLatencyMs,
-            adeLatencyMs: 0,
-            extendedData: {},
-            subConversationId,
-          });
-          await updateConversationTimestamp(conversationId);
-        } catch (dbErr) {
-          console.error("[greeting] DB save failed (response still sent):", dbErr instanceof Error ? dbErr.message : dbErr);
-        }
-
-        // Always send done event even if DB save failed
-        await sendSSE(writer, encoder, {
-          type: "done",
-          data: {
-            messageId: greetingMessageId,
-            conversationId,
-            subConversationId: subConversationId ?? null,
-            usage: { ...ZERO_USAGE, costUsd: 0 },
-            latencyMs: greetingLatencyMs,
-            adeLatencyMs: 0,
-          },
-        });
-
-        await writer.close();
-        return;
       }
     }
 
