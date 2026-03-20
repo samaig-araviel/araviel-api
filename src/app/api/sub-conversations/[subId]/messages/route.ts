@@ -23,7 +23,6 @@ interface FormattedMessage {
   costUsd?: number | null;
   latencyMs?: number | null;
   adeLatencyMs?: number | null;
-  thinkingDurationMs?: number | null;
   feedback?: string | null;
 }
 
@@ -59,7 +58,6 @@ function formatMessage(msg: DBMessageWithFeedback): FormattedMessage {
 
   const extendedData = msg.extended_data as {
     thinkingContent?: string;
-    thinkingDurationMs?: number;
     citations?: Citation[];
   } | null;
 
@@ -81,7 +79,6 @@ function formatMessage(msg: DBMessageWithFeedback): FormattedMessage {
     costUsd: msg.cost_usd,
     latencyMs: msg.latency_ms,
     adeLatencyMs: msg.ade_latency_ms,
-    thinkingDurationMs: extendedData?.thinkingDurationMs ?? null,
   };
 }
 
