@@ -1310,7 +1310,7 @@ async function finalize(
     for (const img of pendingImages) {
       await saveImageMetadata({
         ...img,
-        userId: user.id,
+        userId: creditInfo?.userId || "",
         conversationId,
         messageId,
       });
