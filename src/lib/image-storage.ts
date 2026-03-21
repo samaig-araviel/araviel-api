@@ -11,6 +11,7 @@ interface UploadResult {
 
 interface ImageMetadata {
   id: string;
+  userId: string;
   storagePath: string;
   publicUrl: string;
   conversationId: string;
@@ -92,6 +93,7 @@ export async function saveImageMetadata(meta: ImageMetadata): Promise<void> {
 
   const { error: dbError } = await supabase.from("generated_images").insert({
     id: meta.id,
+    user_id: meta.userId,
     conversation_id: meta.conversationId,
     message_id: meta.messageId,
     storage_path: meta.storagePath,
@@ -113,22 +115,24 @@ export async function saveImageMetadata(meta: ImageMetadata): Promise<void> {
 /**
  * Fetch generated images for the gallery. Newest first, with pagination.
  */
-export async function fetchGeneratedImages(opts?: {
+export async function fetchGeneratedImages(opts: {
+  userId: string;
   limit?: number;
   offset?: number;
   conversationId?: string;
 }) {
   const supabase = getSupabase();
-  const limit = opts?.limit ?? 50;
-  const offset = opts?.offset ?? 0;
+  const limit = opts.limit ?? 50;
+  const offset = opts.offset ?? 0;
 
   let query = supabase
     .from("generated_images")
     .select("*")
+    .eq("user_id", opts.userId)
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (opts?.conversationId) {
+  if (opts.conversationId) {
     query = query.eq("conversation_id", opts.conversationId);
   }
 
@@ -155,14 +159,15 @@ export async function fetchGeneratedImages(opts?: {
 /**
  * Delete a generated image by ID (removes from both storage and database).
  */
-export async function deleteGeneratedImageById(imageId: string) {
+export async function deleteGeneratedImageById(imageId: string, userId: string) {
   const supabase = getSupabase();
 
-  // Get the storage path first
+  // Get the storage path first — scoped to the owning user
   const { data: row, error: fetchError } = await supabase
     .from("generated_images")
     .select("storage_path")
     .eq("id", imageId)
+    .eq("user_id", userId)
     .single();
 
   if (fetchError || !row) {
@@ -172,11 +177,12 @@ export async function deleteGeneratedImageById(imageId: string) {
   // Delete from storage
   await supabase.storage.from(BUCKET).remove([row.storage_path]);
 
-  // Delete from database
+  // Delete from database — scoped to the owning user
   const { error: deleteError } = await supabase
     .from("generated_images")
     .delete()
-    .eq("id", imageId);
+    .eq("id", imageId)
+    .eq("user_id", userId);
 
   if (deleteError) {
     throw new Error(`Failed to delete image: ${deleteError.message}`);

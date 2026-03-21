@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   const conversationId = searchParams.get("conversationId") || undefined;
 
   try {
-    const result = await fetchGeneratedImages({ limit, offset, conversationId });
+    const result = await fetchGeneratedImages({ userId: user.id, limit, offset, conversationId });
     return NextResponse.json(result, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
@@ -72,7 +72,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    await deleteGeneratedImageById(imageId);
+    await deleteGeneratedImageById(imageId, user.id);
     return NextResponse.json({ success: true }, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
