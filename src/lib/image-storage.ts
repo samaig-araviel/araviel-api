@@ -120,6 +120,7 @@ export async function fetchGeneratedImages(opts: {
   limit?: number;
   offset?: number;
   conversationId?: string;
+  search?: string;
 }) {
   const supabase = getSupabase();
   const limit = opts.limit ?? 50;
@@ -134,6 +135,10 @@ export async function fetchGeneratedImages(opts: {
 
   if (opts.conversationId) {
     query = query.eq("conversation_id", opts.conversationId);
+  }
+
+  if (opts.search) {
+    query = query.ilike("prompt", `%${opts.search}%`);
   }
 
   const { data, error } = await query;
