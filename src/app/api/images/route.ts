@@ -32,9 +32,10 @@ export async function GET(request: NextRequest) {
   const limit = parseInt(searchParams.get("limit") || "50", 10);
   const offset = parseInt(searchParams.get("offset") || "0", 10);
   const conversationId = searchParams.get("conversationId") || undefined;
+  const search = searchParams.get("search") || undefined;
 
   try {
-    const result = await fetchGeneratedImages({ userId: user.id, limit, offset, conversationId });
+    const result = await fetchGeneratedImages({ userId: user.id, limit, offset, conversationId, search });
     return NextResponse.json(result, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
