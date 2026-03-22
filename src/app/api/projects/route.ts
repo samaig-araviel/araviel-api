@@ -23,13 +23,22 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get("search");
+
     const supabase = getSupabase();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("projects")
       .select("*")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
+
+    if (search) {
+      query = query.ilike("name", `%${search}%`);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       return NextResponse.json(

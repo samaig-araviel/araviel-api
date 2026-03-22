@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get("projectId");
     const starredParam = searchParams.get("starred");
     const archivedParam = searchParams.get("archived");
+    const search = searchParams.get("search");
 
     const supabase = getSupabase();
 
@@ -58,6 +59,11 @@ export async function GET(request: NextRequest) {
       const isArchived = archivedParam === "true";
       dataQuery = dataQuery.eq("is_archived", isArchived);
       countQuery = countQuery.eq("is_archived", isArchived);
+    }
+
+    if (search) {
+      dataQuery = dataQuery.ilike("title", `%${search}%`);
+      countQuery = countQuery.ilike("title", `%${search}%`);
     }
 
     const [{ data, error }, { count, error: countError }] = await Promise.all([
