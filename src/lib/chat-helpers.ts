@@ -546,7 +546,15 @@ export function buildSystemPrompt(
     const parts: string[] = [];
 
     if (us.responseTone && us.responseTone !== "default") {
-      parts.push(`Respond in a ${us.responseTone} tone.`);
+      const toneInstructions: Record<string, string> = {
+        professional: "Respond in a polished, precise, and professional tone.",
+        friendly: "Respond in a warm, chatty, and approachable tone.",
+        candid: "Respond in a direct, encouraging, and straightforward tone. Be honest and get to the point.",
+        quirky: "Respond in a playful, imaginative, and creative tone. Be inventive with your language.",
+        efficient: "Respond concisely and plainly. Keep answers short, direct, and to the point.",
+        cynical: "Respond with a critical, skeptical, and sarcastic edge. Be blunt and unfiltered.",
+      };
+      parts.push(toneInstructions[us.responseTone] ?? `Respond in a ${us.responseTone} tone.`);
     }
     if (us.preferredLanguage && us.preferredLanguage !== "English") {
       parts.push(`Respond in ${us.preferredLanguage}.`);
