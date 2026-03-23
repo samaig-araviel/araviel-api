@@ -485,7 +485,40 @@ export function getImageCapableModels(): {
   };
 }
 
-export function buildSystemPrompt(projectInstructions?: string, options?: { includeFileInstructions?: boolean }): string {
+export interface UserSettingsForPrompt {
+  customInstructions?: string;
+  responseTone?: string;
+  occupation?: string;
+  expertise?: string;
+  preferredLanguage?: string;
+}
+
+export async function getUserSettingsForChat(userId: string): Promise<UserSettingsForPrompt | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("custom_instructions, response_tone, occupation, expertise, preferred_language")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    customInstructions: data.custom_instructions || "",
+    responseTone: data.response_tone || "default",
+    occupation: data.occupation || "",
+    expertise: data.expertise || "",
+    preferredLanguage: data.preferred_language || "English",
+  };
+}
+
+export function buildSystemPrompt(
+  projectInstructions?: string,
+  options?: {
+    includeFileInstructions?: boolean;
+    userSettings?: UserSettingsForPrompt | null;
+  }
+): string {
   const basePrompt = [
     "You are a helpful AI assistant powered by Araviel, an intelligent AI platform.",
     "Provide clear, accurate, and well-structured responses.",
@@ -505,6 +538,32 @@ export function buildSystemPrompt(projectInstructions?: string, options?: { incl
 
   if (projectInstructions && projectInstructions.trim()) {
     prompt += `\n\n--- Project Instructions ---\nThe following instructions were set by the user for this project. Follow them for all responses in this conversation:\n\n${projectInstructions}`;
+  }
+
+  // Inject user preferences into the system prompt
+  const us = options?.userSettings;
+  if (us) {
+    const parts: string[] = [];
+
+    if (us.responseTone && us.responseTone !== "default") {
+      parts.push(`Respond in a ${us.responseTone} tone.`);
+    }
+    if (us.preferredLanguage && us.preferredLanguage !== "English") {
+      parts.push(`Respond in ${us.preferredLanguage}.`);
+    }
+    if (us.occupation) {
+      parts.push(`The user's occupation is: ${us.occupation}.`);
+    }
+    if (us.expertise) {
+      parts.push(`The user has expertise in: ${us.expertise}. Adjust technical depth accordingly.`);
+    }
+    if (us.customInstructions && us.customInstructions.trim()) {
+      parts.push(`The user has provided the following personal instructions. Follow them for all responses:\n\n${us.customInstructions}`);
+    }
+
+    if (parts.length > 0) {
+      prompt += `\n\n--- User Preferences ---\n${parts.join("\n")}`;
+    }
   }
 
   return prompt;

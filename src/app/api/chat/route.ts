@@ -20,6 +20,7 @@ import {
   getPreviousModelId,
   resolveModel,
   buildSystemPrompt,
+  getUserSettingsForChat,
   detectFileIntent,
   getProjectInstructionsForConversation,
   resolveWebSearch,
@@ -282,8 +283,11 @@ async function handleChat(
       },
     });
 
-    // 12. Fetch project instructions for system prompt
-    const projectInstructions = await getProjectInstructionsForConversation(conversationId);
+    // 12. Fetch project instructions and user settings for system prompt (in parallel)
+    const [projectInstructions, userSettings] = await Promise.all([
+      getProjectInstructionsForConversation(conversationId),
+      getUserSettingsForChat(user.id),
+    ]);
 
     // 13. Determine if image generation is needed
     const enableImageGeneration =
@@ -309,7 +313,7 @@ async function handleChat(
     }
 
     const includeFileInstructions = detectFileIntent(chatReq.message);
-    const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions });
+    const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions, userSettings });
     const enableWebSearch = shouldUseWebSearch;
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 

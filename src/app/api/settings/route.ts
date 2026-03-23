@@ -30,6 +30,11 @@ const DEFAULT_SETTINGS = {
   notify_new_features: true,
   notify_usage_limits: true,
   notify_sounds: true,
+  avatar_url: "",
+  full_name: "",
+  phone: "",
+  website: "",
+  location: "",
 };
 
 /** Map camelCase frontend keys to snake_case DB columns. */
@@ -59,6 +64,11 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
   notifyNewFeatures: "notify_new_features",
   notifyUsageLimits: "notify_usage_limits",
   notifySounds: "notify_sounds",
+  avatarUrl: "avatar_url",
+  fullName: "full_name",
+  phone: "phone",
+  website: "website",
+  location: "location",
 };
 
 function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {
