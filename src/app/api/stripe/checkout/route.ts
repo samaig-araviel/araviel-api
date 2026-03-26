@@ -7,11 +7,12 @@ import { corsHeaders, handleCorsOptions } from "../../cors";
 
 export const runtime = "nodejs";
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
 export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUser) => {
+  const origin = request.headers.get("origin");
   try {
     const body = await request.json();
     const { tier, interval } = body;
@@ -20,13 +21,13 @@ export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUse
     if (!tier || !["lite", "pro"].includes(tier)) {
       return NextResponse.json(
         { error: "Invalid tier. Must be 'lite' or 'pro'." },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
     if (!interval || !["monthly", "annual"].includes(interval)) {
       return NextResponse.json(
         { error: "Invalid interval. Must be 'monthly' or 'annual'." },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -34,7 +35,7 @@ export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUse
     if (!priceId) {
       return NextResponse.json(
         { error: "Price configuration not found for this tier/interval." },
-        { status: 500, headers: corsHeaders() }
+        { status: 500, headers: corsHeaders(origin) }
       );
     }
 
@@ -83,13 +84,13 @@ export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUse
 
     return NextResponse.json(
       { url: session.url },
-      { status: 200, headers: corsHeaders() }
+      { status: 200, headers: corsHeaders(origin) }
     );
   } catch (err) {
     console.error("[stripe/checkout] Error:", err instanceof Error ? err.message : err);
     return NextResponse.json(
       { error: "Failed to create checkout session" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 });
