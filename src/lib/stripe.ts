@@ -21,13 +21,25 @@ interface TierInfo {
   interval: "monthly" | "annual";
 }
 
+// Sandbox defaults — env vars override these in production
+const SANDBOX_PRICES: Record<string, string> = {
+  STRIPE_PRICE_LITE_MONTHLY: "price_1TEzOPDgaoOWbIEAfsQzAeWf",
+  STRIPE_PRICE_LITE_ANNUAL: "price_1TEzTRDgaoOWbIEAfIWS9nrC",
+  STRIPE_PRICE_PRO_MONTHLY: "price_1TEzRjDgaoOWbIEAxD2w2t0z",
+  STRIPE_PRICE_PRO_ANNUAL: "price_1TEzUfDgaoOWbIEAOoeLS3HW",
+};
+
+function getPrice(envKey: string): string | undefined {
+  return process.env[envKey] || SANDBOX_PRICES[envKey];
+}
+
 function buildPriceMap(): Record<string, TierInfo> {
   const map: Record<string, TierInfo> = {};
 
-  const liteMo = process.env.STRIPE_PRICE_LITE_MONTHLY;
-  const liteAn = process.env.STRIPE_PRICE_LITE_ANNUAL;
-  const proMo = process.env.STRIPE_PRICE_PRO_MONTHLY;
-  const proAn = process.env.STRIPE_PRICE_PRO_ANNUAL;
+  const liteMo = getPrice("STRIPE_PRICE_LITE_MONTHLY");
+  const liteAn = getPrice("STRIPE_PRICE_LITE_ANNUAL");
+  const proMo = getPrice("STRIPE_PRICE_PRO_MONTHLY");
+  const proAn = getPrice("STRIPE_PRICE_PRO_ANNUAL");
 
   if (liteMo) map[liteMo] = { tier: "lite", interval: "monthly" };
   if (liteAn) map[liteAn] = { tier: "lite", interval: "annual" };
@@ -52,7 +64,7 @@ export function getPriceId(
   interval: string
 ): string | null {
   const envKey = `STRIPE_PRICE_${tier.toUpperCase()}_${interval.toUpperCase()}`;
-  return process.env[envKey] ?? null;
+  return getPrice(envKey) ?? null;
 }
 
 // ─── Daily Credit Limits ───────────────────────────────────────────────────
