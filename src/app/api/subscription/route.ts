@@ -6,11 +6,12 @@ import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
-export const GET = withAuth(async (_request: NextRequest, user: AuthenticatedUser) => {
+export const GET = withAuth(async (request: NextRequest, user: AuthenticatedUser) => {
+  const origin = request.headers.get("origin");
   try {
     const subscription = await getUserSubscription(user.id);
     const tier = subscription?.tier ?? "free";
@@ -32,13 +33,13 @@ export const GET = withAuth(async (_request: NextRequest, user: AuthenticatedUse
         cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
         firstMonth,
       },
-      { status: 200, headers: corsHeaders() }
+      { status: 200, headers: corsHeaders(origin) }
     );
   } catch (err) {
     console.error("[subscription] Error fetching subscription:", err instanceof Error ? err.message : err);
     return NextResponse.json(
       { error: "Failed to fetch subscription" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 });

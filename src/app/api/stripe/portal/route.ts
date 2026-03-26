@@ -7,18 +7,19 @@ import { corsHeaders, handleCorsOptions } from "../../cors";
 
 export const runtime = "nodejs";
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
-export const POST = withAuth(async (_request: NextRequest, user: AuthenticatedUser) => {
+export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUser) => {
+  const origin = request.headers.get("origin");
   try {
     const customerId = await getStripeCustomerId(user.id);
 
     if (!customerId) {
       return NextResponse.json(
         { error: "No active subscription found. Subscribe first." },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -32,13 +33,13 @@ export const POST = withAuth(async (_request: NextRequest, user: AuthenticatedUs
 
     return NextResponse.json(
       { url: session.url },
-      { status: 200, headers: corsHeaders() }
+      { status: 200, headers: corsHeaders(origin) }
     );
   } catch (err) {
     console.error("[stripe/portal] Error:", err instanceof Error ? err.message : err);
     return NextResponse.json(
       { error: "Failed to create portal session" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 });
