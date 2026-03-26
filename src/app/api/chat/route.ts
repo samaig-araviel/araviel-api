@@ -104,45 +104,74 @@ async function handleChat(
     const body = await request.json();
     const chatReq = validateChatRequest(body);
 
-    // 1b. Guest user check — anonymous users have limited prompts (enforced client-side, safety net here)
+    // 1b. Guest/anonymous credit handling
+    let serverTier = "free";
+    let creditResult: TextCreditState | null = null;
+
     if (user.isAnonymous) {
-      await sendSSE(writer, encoder, {
-        type: "error",
-        data: { message: "Sign up free to keep chatting. No card required.", code: "GUEST_LIMIT" },
-      });
-      await writer.close();
-      return;
-    }
+      // Server-side guest limit: count user's messages across their conversations
+      const { getSupabase: getSb } = await import("@/lib/supabase");
+      const sb = getSb();
+      const { data: convos } = await sb
+        .from("conversations")
+        .select("id")
+        .eq("user_id", user.id);
+      const convoIds = (convos ?? []).map((c: { id: string }) => c.id);
 
-    // 1c. Server-side subscription + text credit check (monthly + 3-hour window)
-    const subscription = await getUserSubscription(user.id);
-    const serverTier = subscription?.tier ?? "free";
+      let guestMessageCount = 0;
+      if (convoIds.length > 0) {
+        const { count } = await sb
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("role", "user")
+          .in("conversation_id", convoIds);
+        guestMessageCount = count ?? 0;
+      }
 
-    const creditResult: TextCreditState = await checkAndConsumeTextCredit(
-      user.id,
-      serverTier,
-      subscription?.firstMonth ?? false
-    );
+      const GUEST_MESSAGE_LIMIT = 3;
+      if (guestMessageCount >= GUEST_MESSAGE_LIMIT) {
+        await sendSSE(writer, encoder, {
+          type: "error",
+          data: {
+            message: "Sign up free to keep chatting. No card required.",
+            code: "GUEST_LIMIT",
+          },
+        });
+        await writer.close();
+        return;
+      }
+      // Guest within limit — skip text credit system, proceed to chat
+    } else {
+      // 1c. Signed-in user: subscription + text credit check (monthly + 3-hour window)
+      const subscription = await getUserSubscription(user.id);
+      serverTier = subscription?.tier ?? "free";
 
-    if (!creditResult.allowed) {
-      const isMonthly = creditResult.reason === "monthly_exhausted";
-      await sendSSE(writer, encoder, {
-        type: "error",
-        data: {
-          message: isMonthly
-            ? "You've used all your monthly credits. Upgrade for more."
-            : "You've reached your 3-hour limit. Take a break or upgrade.",
-          code: isMonthly ? "MONTHLY_CREDITS_EXHAUSTED" : "WINDOW_CREDITS_EXHAUSTED",
-          tier: serverTier,
-          monthlyUsed: creditResult.monthlyUsed,
-          monthlyLimit: creditResult.monthlyLimit,
-          windowUsed: creditResult.windowUsed,
-          windowLimit: creditResult.windowLimit,
-          windowResetAt: creditResult.windowResetAt,
-        },
-      });
-      await writer.close();
-      return;
+      creditResult = await checkAndConsumeTextCredit(
+        user.id,
+        serverTier,
+        subscription?.firstMonth ?? false
+      );
+
+      if (!creditResult.allowed) {
+        const isMonthly = creditResult.reason === "monthly_exhausted";
+        await sendSSE(writer, encoder, {
+          type: "error",
+          data: {
+            message: isMonthly
+              ? "You've used all your monthly credits. Upgrade for more."
+              : "You've reached your 3-hour limit. Take a break or upgrade.",
+            code: isMonthly ? "MONTHLY_CREDITS_EXHAUSTED" : "WINDOW_CREDITS_EXHAUSTED",
+            tier: serverTier,
+            monthlyUsed: creditResult.monthlyUsed,
+            monthlyLimit: creditResult.monthlyLimit,
+            windowUsed: creditResult.windowUsed,
+            windowLimit: creditResult.windowLimit,
+            windowResetAt: creditResult.windowResetAt,
+          },
+        });
+        await writer.close();
+        return;
+      }
     }
 
     // 2. Get or create conversation (for sub-conversations, validate and use the parent conversation)
@@ -366,7 +395,7 @@ async function handleChat(
       userId: user.id,
       imageQuality: imageQuality,
       wasImageGeneration: enableImageGeneration,
-      textCredits: creditResult,
+      textCredits: creditResult ?? undefined,
     };
 
     // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
