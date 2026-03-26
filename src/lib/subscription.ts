@@ -1,5 +1,5 @@
 import { getSupabase } from "./supabase";
-import { getDailyCreditsLimit } from "./stripe";
+import { getTextCreditConfig } from "./stripe";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -15,10 +15,14 @@ export interface Subscription {
   firstMonth: boolean;
 }
 
-export interface DailyCredits {
-  creditsUsed: number;
-  creditsLimit: number;
-  bonusCredits: number;
+export interface TextCreditState {
+  allowed: boolean;
+  reason: "monthly_exhausted" | "window_exhausted" | null;
+  monthlyUsed: number;
+  monthlyLimit: number;
+  windowUsed: number;
+  windowLimit: number;
+  windowResetAt: string;
 }
 
 // ─── Subscription Queries ──────────────────────────────────────────────────
@@ -117,99 +121,103 @@ export async function getStripeCustomerId(
   return data?.stripe_customer_id ?? null;
 }
 
-// ─── Daily Credit Queries ──────────────────────────────────────────────────
+// ─── Text Credit Functions (Monthly + 3-Hour Window) ───────────────────────
 
 /**
- * Get or create today's daily credit row for a user.
- * If no row exists for today, inserts one with the correct limit.
+ * Atomically check + consume 1 text credit via Postgres RPC.
+ * Handles monthly cap, 3-hour window cap, and window reset.
+ * Returns the credit state including whether the credit was allowed.
  */
-export async function getOrCreateDailyCredits(
+export async function checkAndConsumeTextCredit(
   userId: string,
   tier: string,
   firstMonth: boolean
-): Promise<DailyCredits> {
+): Promise<TextCreditState> {
   const sb = getSupabase();
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const config = getTextCreditConfig(tier, firstMonth);
 
-  // Try to read existing row
-  const { data: existing } = await sb
-    .from("daily_credits")
-    .select("credits_used, credits_limit, bonus_credits")
-    .eq("user_id", userId)
-    .eq("date", today)
-    .single();
+  const { data, error } = await sb.rpc("consume_text_credit", {
+    p_user_id: userId,
+    p_monthly_limit: config.monthly,
+    p_window_limit: config.window,
+    p_first_month_bonus: config.firstMonthBonus,
+  });
 
-  if (existing) {
+  if (error) {
+    console.error("[subscription] consume_text_credit RPC failed:", error.message);
+    // Graceful fallback: allow the request
     return {
-      creditsUsed: existing.credits_used,
-      creditsLimit: existing.credits_limit,
-      bonusCredits: existing.bonus_credits,
+      allowed: true,
+      reason: null,
+      monthlyUsed: 0,
+      monthlyLimit: config.monthly + config.firstMonthBonus,
+      windowUsed: 0,
+      windowLimit: config.window,
+      windowResetAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
     };
   }
 
-  // Create row for today
-  const limit = getDailyCreditsLimit(tier, firstMonth);
-
-  const { data: created, error } = await sb
-    .from("daily_credits")
-    .insert({
-      user_id: userId,
-      date: today,
-      credits_used: 0,
-      credits_limit: limit,
-      bonus_credits: 0,
-    })
-    .select("credits_used, credits_limit, bonus_credits")
-    .single();
-
-  if (error) {
-    // Race condition: another request already created the row
-    if (error.code === "23505") {
-      const { data: retry } = await sb
-        .from("daily_credits")
-        .select("credits_used, credits_limit, bonus_credits")
-        .eq("user_id", userId)
-        .eq("date", today)
-        .single();
-
-      if (retry) {
-        return {
-          creditsUsed: retry.credits_used,
-          creditsLimit: retry.credits_limit,
-          bonusCredits: retry.bonus_credits,
-        };
-      }
-    }
-
-    console.error("[subscription] Failed to create daily credits:", error.message);
-    // Graceful fallback: allow the request with default limits
-    return { creditsUsed: 0, creditsLimit: getDailyCreditsLimit(tier, firstMonth), bonusCredits: 0 };
-  }
-
   return {
-    creditsUsed: created?.credits_used ?? 0,
-    creditsLimit: created?.credits_limit ?? limit,
-    bonusCredits: created?.bonus_credits ?? 0,
+    allowed: data.allowed,
+    reason: data.reason ?? null,
+    monthlyUsed: data.monthly_used,
+    monthlyLimit: data.monthly_limit,
+    windowUsed: data.window_used,
+    windowLimit: data.window_limit,
+    windowResetAt: data.window_reset_at,
   };
 }
 
 /**
- * Consume credits (atomic increment via Postgres RPC). Fire-and-forget safe.
+ * Read-only: get current text credit state without consuming.
+ * Used by GET /api/subscription to return credit status.
  */
-export async function consumeCredits(
+export async function getTextCreditState(
   userId: string,
-  amount: number
-): Promise<void> {
+  tier: string,
+  firstMonth: boolean
+): Promise<Omit<TextCreditState, "allowed" | "reason">> {
   const sb = getSupabase();
-  const today = new Date().toISOString().slice(0, 10);
+  const config = getTextCreditConfig(tier, firstMonth);
 
-  const { error } = await sb.rpc("increment_daily_credits", {
+  const { data, error } = await sb.rpc("get_text_credit_state", {
     p_user_id: userId,
-    p_date: today,
-    p_amount: amount,
+    p_monthly_limit: config.monthly,
+    p_window_limit: config.window,
+    p_first_month_bonus: config.firstMonthBonus,
   });
 
   if (error) {
-    console.error("[subscription] consumeCredits RPC failed:", error.message);
+    console.error("[subscription] get_text_credit_state RPC failed:", error.message);
+    return {
+      monthlyUsed: 0,
+      monthlyLimit: config.monthly + config.firstMonthBonus,
+      windowUsed: 0,
+      windowLimit: config.window,
+      windowResetAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+    };
+  }
+
+  return {
+    monthlyUsed: data.monthly_used,
+    monthlyLimit: data.monthly_limit,
+    windowUsed: data.window_used,
+    windowLimit: data.window_limit,
+    windowResetAt: data.window_reset_at,
+  };
+}
+
+/**
+ * Reset monthly text credits. Called on billing period renewal (webhook).
+ */
+export async function resetMonthlyTextCredits(userId: string): Promise<void> {
+  const sb = getSupabase();
+
+  const { error } = await sb.rpc("reset_monthly_text_credits", {
+    p_user_id: userId,
+  });
+
+  if (error) {
+    console.error("[subscription] resetMonthlyTextCredits failed:", error.message);
   }
 }

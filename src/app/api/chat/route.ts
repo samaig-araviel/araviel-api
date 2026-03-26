@@ -35,8 +35,8 @@ import {
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits } from "@/lib/credits";
-import { getUserSubscription, getOrCreateDailyCredits, consumeCredits as consumeDailyCredits } from "@/lib/subscription";
-import type { DailyCredits } from "@/lib/subscription";
+import { getUserSubscription, checkAndConsumeTextCredit } from "@/lib/subscription";
+import type { TextCreditState } from "@/lib/subscription";
 import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
@@ -104,22 +104,41 @@ async function handleChat(
     const body = await request.json();
     const chatReq = validateChatRequest(body);
 
-    // 1b. Server-side subscription + credit check (don't trust client userTier)
+    // 1b. Guest user check — anonymous users have limited prompts (enforced client-side, safety net here)
+    if (user.isAnonymous) {
+      await sendSSE(writer, encoder, {
+        type: "error",
+        data: { message: "Sign up free to keep chatting. No card required.", code: "GUEST_LIMIT" },
+      });
+      await writer.close();
+      return;
+    }
+
+    // 1c. Server-side subscription + text credit check (monthly + 3-hour window)
     const subscription = await getUserSubscription(user.id);
     const serverTier = subscription?.tier ?? "free";
-    const dailyCredits: DailyCredits = await getOrCreateDailyCredits(
+
+    const creditResult: TextCreditState = await checkAndConsumeTextCredit(
       user.id,
       serverTier,
       subscription?.firstMonth ?? false
     );
 
-    if (dailyCredits.creditsUsed >= dailyCredits.creditsLimit + dailyCredits.bonusCredits) {
+    if (!creditResult.allowed) {
+      const isMonthly = creditResult.reason === "monthly_exhausted";
       await sendSSE(writer, encoder, {
         type: "error",
         data: {
-          message: "You've used all your daily credits. Upgrade your plan for more.",
-          code: "CREDITS_EXHAUSTED",
+          message: isMonthly
+            ? "You've used all your monthly credits. Upgrade for more."
+            : "You've reached your 3-hour limit. Take a break or upgrade.",
+          code: isMonthly ? "MONTHLY_CREDITS_EXHAUSTED" : "WINDOW_CREDITS_EXHAUSTED",
           tier: serverTier,
+          monthlyUsed: creditResult.monthlyUsed,
+          monthlyLimit: creditResult.monthlyLimit,
+          windowUsed: creditResult.windowUsed,
+          windowLimit: creditResult.windowLimit,
+          windowResetAt: creditResult.windowResetAt,
         },
       });
       await writer.close();
@@ -347,7 +366,7 @@ async function handleChat(
       userId: user.id,
       imageQuality: imageQuality,
       wasImageGeneration: enableImageGeneration,
-      dailyCredits,
+      textCredits: creditResult,
     };
 
     // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
@@ -1291,7 +1310,7 @@ async function finalize(
   encoder: TextEncoder,
   subConversationId?: string,
   pendingImages?: PendingImageMeta[],
-  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; dailyCredits?: DailyCredits }
+  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; textCredits?: TextCreditState }
 ): Promise<void> {
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
@@ -1382,12 +1401,7 @@ async function finalize(
     }
   }
 
-  // Consume 1 daily credit (non-blocking, fire-and-forget)
-  if (creditInfo?.userId) {
-    consumeDailyCredits(creditInfo.userId, 1).catch((err) =>
-      console.error("[chat] Daily credit consumption failed:", err instanceof Error ? err.message : err)
-    );
-  }
+  // Text credit was already consumed atomically in handleChat (checkAndConsumeTextCredit)
 
   // Send follow-ups and questions from parsed metadata before the done event
   if (result.meta) {
@@ -1427,10 +1441,13 @@ async function finalize(
           quality: creditInfo?.imageQuality ?? "standard",
         },
       }),
-      ...(creditInfo?.dailyCredits && {
-        dailyCredits: {
-          used: creditInfo.dailyCredits.creditsUsed + 1,
-          limit: creditInfo.dailyCredits.creditsLimit,
+      ...(creditInfo?.textCredits && {
+        textCredits: {
+          monthlyUsed: creditInfo.textCredits.monthlyUsed,
+          monthlyLimit: creditInfo.textCredits.monthlyLimit,
+          windowUsed: creditInfo.textCredits.windowUsed,
+          windowLimit: creditInfo.textCredits.windowLimit,
+          windowResetAt: creditInfo.textCredits.windowResetAt,
         },
       }),
     },
