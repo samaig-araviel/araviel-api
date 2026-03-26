@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripe, getTierFromPriceId, getDailyCreditsLimit } from "@/lib/stripe";
-import { upsertSubscription, getOrCreateDailyCredits } from "@/lib/subscription";
+import { getStripe, getTierFromPriceId } from "@/lib/stripe";
+import { upsertSubscription, resetMonthlyTextCredits } from "@/lib/subscription";
 import { updateTier } from "@/lib/credits";
 import type Stripe from "stripe";
 
@@ -114,9 +114,7 @@ async function handleCheckoutCompleted(
     firstMonth: true,
   });
 
-  // Create today's daily credits with first-month doubled limit
-  const limit = getDailyCreditsLimit(tierInfo.tier, true);
-  await getOrCreateDailyCredits(userId, tierInfo.tier, true);
+  // Text credits are auto-created by the consume_text_credit RPC on first use
 
   // Sync image credit tier via existing credits system
   try {
@@ -126,7 +124,7 @@ async function handleCheckoutCompleted(
   }
 
   console.log(
-    `[stripe/webhook] Checkout completed: user=${userId} tier=${tierInfo.tier} interval=${tierInfo.interval} credits=${limit}/day`
+    `[stripe/webhook] Checkout completed: user=${userId} tier=${tierInfo.tier} interval=${tierInfo.interval}`
   );
 }
 
@@ -199,6 +197,15 @@ async function handleSubscriptionUpdated(
     await updateTier(userId, tierInfo.tier);
   } catch (err) {
     console.error("[stripe/webhook] Failed to sync image credit tier:", err instanceof Error ? err.message : err);
+  }
+
+  // On renewal, reset monthly text credits
+  if (isRenewal) {
+    try {
+      await resetMonthlyTextCredits(userId);
+    } catch (err) {
+      console.error("[stripe/webhook] Failed to reset monthly text credits:", err instanceof Error ? err.message : err);
+    }
   }
 
   console.log(

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
-import { getUserSubscription, getOrCreateDailyCredits } from "@/lib/subscription";
+import { getUserSubscription, getTextCreditState } from "@/lib/subscription";
+import { getBalance } from "@/lib/credits";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 export const runtime = "nodejs";
@@ -17,21 +18,34 @@ export const GET = withAuth(async (request: NextRequest, user: AuthenticatedUser
     const tier = subscription?.tier ?? "free";
     const firstMonth = subscription?.firstMonth ?? false;
 
-    const credits = await getOrCreateDailyCredits(user.id, tier, firstMonth);
+    // Get text credit state (monthly + window)
+    const textCredits = await getTextCreditState(user.id, tier, firstMonth);
+
+    // Get image credit balance
+    const imageBalance = await getBalance(user.id);
 
     return NextResponse.json(
       {
         tier,
         status: subscription?.status ?? "active",
         billingInterval: subscription?.billingInterval ?? null,
-        credits: {
-          used: credits.creditsUsed,
-          limit: credits.creditsLimit,
-          bonus: credits.bonusCredits,
-        },
         periodEnd: subscription?.currentPeriodEnd ?? null,
         cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
         firstMonth,
+        textCredits: {
+          monthlyUsed: textCredits.monthlyUsed,
+          monthlyLimit: textCredits.monthlyLimit,
+          windowUsed: textCredits.windowUsed,
+          windowLimit: textCredits.windowLimit,
+          windowResetAt: textCredits.windowResetAt,
+        },
+        imageCredits: {
+          used: imageBalance.monthly.used,
+          limit: imageBalance.monthly.total,
+          remaining: imageBalance.monthly.remaining,
+          packRemaining: imageBalance.packs.remaining,
+          cycleResetsAt: imageBalance.cycleResetsAt,
+        },
       },
       { status: 200, headers: corsHeaders(origin) }
     );

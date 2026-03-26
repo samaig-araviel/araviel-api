@@ -67,25 +67,39 @@ export function getPriceId(
   return getPrice(envKey) ?? null;
 }
 
-// ─── Daily Credit Limits ───────────────────────────────────────────────────
+// ─── Text Credit Limits (Monthly + 3-hour Window) ──────────────────────────
 
-export const TIER_DAILY_CREDITS: Record<string, number> = {
-  free: 30,
-  lite: 150,
-  pro: 400,
+export interface TextCreditConfig {
+  monthly: number;
+  window: number;
+  firstMonthBonus: number;
+}
+
+export const TIER_TEXT_CREDITS: Record<string, TextCreditConfig> = {
+  free: { monthly: 100, window: 8, firstMonthBonus: 0 },
+  lite: { monthly: 1500, window: 60, firstMonthBonus: 750 },
+  pro: { monthly: 4000, window: 160, firstMonthBonus: 2000 },
 };
 
-export const FIRST_MONTH_MULTIPLIER = 2;
+export const TIER_IMAGE_CREDITS: Record<string, number> = {
+  free: 5,
+  lite: 50,
+  pro: 150,
+};
 
 /**
- * Get the daily credit limit for a tier, doubled if first month.
+ * Get text credit config for a tier, including first-month bonus if applicable.
  */
-export function getDailyCreditsLimit(
+export function getTextCreditConfig(
   tier: string,
   firstMonth: boolean
-): number {
-  const base = TIER_DAILY_CREDITS[tier] ?? TIER_DAILY_CREDITS.free;
-  return firstMonth ? base * FIRST_MONTH_MULTIPLIER : base;
+): TextCreditConfig {
+  const config = TIER_TEXT_CREDITS[tier] ?? TIER_TEXT_CREDITS.free;
+  return {
+    monthly: config.monthly,
+    window: config.window,
+    firstMonthBonus: firstMonth ? config.firstMonthBonus : 0,
+  };
 }
 
 // ─── Frontend URL ──────────────────────────────────────────────────────────
