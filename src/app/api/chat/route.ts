@@ -35,6 +35,8 @@ import {
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits } from "@/lib/credits";
+import { getUserSubscription, getOrCreateDailyCredits, consumeCredits as consumeDailyCredits } from "@/lib/subscription";
+import type { DailyCredits } from "@/lib/subscription";
 import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
@@ -101,6 +103,28 @@ async function handleChat(
     // 1. Parse and validate
     const body = await request.json();
     const chatReq = validateChatRequest(body);
+
+    // 1b. Server-side subscription + credit check (don't trust client userTier)
+    const subscription = await getUserSubscription(user.id);
+    const serverTier = subscription?.tier ?? "free";
+    const dailyCredits: DailyCredits = await getOrCreateDailyCredits(
+      user.id,
+      serverTier,
+      subscription?.firstMonth ?? false
+    );
+
+    if (dailyCredits.creditsUsed >= dailyCredits.creditsLimit + dailyCredits.bonusCredits) {
+      await sendSSE(writer, encoder, {
+        type: "error",
+        data: {
+          message: "You've used all your daily credits. Upgrade your plan for more.",
+          code: "CREDITS_EXHAUSTED",
+          tier: serverTier,
+        },
+      });
+      await writer.close();
+      return;
+    }
 
     // 2. Get or create conversation (for sub-conversations, validate and use the parent conversation)
     let conversationId: string;
@@ -202,7 +226,7 @@ async function handleChat(
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
       prompt: chatReq.message,
       modality: chatReq.modality ?? "text",
-      userTier: chatReq.userTier ?? "free",
+      userTier: serverTier,
       availableProviders,
       context: {
         conversationId,
@@ -323,6 +347,7 @@ async function handleChat(
       userId: user.id,
       imageQuality: imageQuality,
       wasImageGeneration: enableImageGeneration,
+      dailyCredits,
     };
 
     // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
@@ -1266,7 +1291,7 @@ async function finalize(
   encoder: TextEncoder,
   subConversationId?: string,
   pendingImages?: PendingImageMeta[],
-  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean }
+  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; dailyCredits?: DailyCredits }
 ): Promise<void> {
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
@@ -1357,6 +1382,13 @@ async function finalize(
     }
   }
 
+  // Consume 1 daily credit (non-blocking, fire-and-forget)
+  if (creditInfo?.userId) {
+    consumeDailyCredits(creditInfo.userId, 1).catch((err) =>
+      console.error("[chat] Daily credit consumption failed:", err instanceof Error ? err.message : err)
+    );
+  }
+
   // Send follow-ups and questions from parsed metadata before the done event
   if (result.meta) {
     if (result.meta.followUps.length > 0) {
@@ -1393,6 +1425,12 @@ async function finalize(
           charged: creditChargeResult.creditsCharged,
           remaining: creditChargeResult.remainingBalance,
           quality: creditInfo?.imageQuality ?? "standard",
+        },
+      }),
+      ...(creditInfo?.dailyCredits && {
+        dailyCredits: {
+          used: creditInfo.dailyCredits.creditsUsed + 1,
+          limit: creditInfo.dailyCredits.creditsLimit,
         },
       }),
     },
