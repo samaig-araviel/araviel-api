@@ -26,13 +26,17 @@ export async function GET(request: NextRequest) {
     user = await authenticateRequest(request);
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+      const headers = corsHeaders();
+      headers["Cache-Control"] = "no-cache, no-store, max-age=0";
+      return NextResponse.json({ error: err.message }, { status: err.status, headers });
     }
     throw err;
   }
 
   try {
     const balance = await getBalance(user.id);
+    const headers = corsHeaders();
+    headers["Cache-Control"] = "no-cache, no-store, max-age=0";
     return NextResponse.json(
       {
         balance,
@@ -40,12 +44,14 @@ export async function GET(request: NextRequest) {
         tiers: TIER_MONTHLY_CREDITS,
         packs: PACK_DEFINITIONS,
       },
-      { headers: corsHeaders() }
+      { headers }
     );
   } catch (err) {
+    const headers = corsHeaders();
+    headers["Cache-Control"] = "no-cache, no-store, max-age=0";
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to get balance" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers }
     );
   }
 }
