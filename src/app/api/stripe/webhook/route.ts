@@ -32,6 +32,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    console.log("[stripe/webhook] ✅ Signature verified | Event type:", event.type);
   } catch (err) {
     console.error(
       "[stripe/webhook] Signature verification failed:",
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   try {
+    console.log("[stripe/webhook] Processing event:", event.type);
     switch (event.type) {
       case "checkout.session.completed":
         await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
@@ -81,6 +83,12 @@ export async function POST(request: NextRequest): Promise<Response> {
 async function handleCheckoutCompleted(
   session: Stripe.Checkout.Session
 ): Promise<void> {
+  // DEBUG: Log the exact metadata received from Stripe
+  console.log("[stripe/webhook] 📦 checkout.session.completed event received");
+  console.log("[stripe/webhook] Metadata from Stripe:", JSON.stringify(session.metadata, null, 2));
+  console.log("[stripe/webhook] Session mode:", session.mode);
+  console.log("[stripe/webhook] Session subscription ID:", session.subscription);
+
   const userId = session.metadata?.userId;
   if (!userId) {
     console.error("[stripe/webhook] checkout.session.completed missing userId in metadata");
@@ -88,6 +96,7 @@ async function handleCheckoutCompleted(
   }
 
   const checkoutType = session.metadata?.type;
+  console.log("[stripe/webhook] 🔍 Parsed values - userId:", userId, "| checkoutType:", checkoutType);
 
   // Check if this is a pack purchase (payment mode) or subscription
   if (checkoutType === "pack") {
