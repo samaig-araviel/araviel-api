@@ -146,6 +146,8 @@ async function handlePackPurchase(
   session: Stripe.Checkout.Session,
   userId: string
 ): Promise<void> {
+  console.log("[stripe/webhook] 🔄 Handling pack purchase for user:", userId);
+
   const packType = session.metadata?.packType;
   if (!packType) {
     console.error("[stripe/webhook] pack purchase missing packType in metadata");
