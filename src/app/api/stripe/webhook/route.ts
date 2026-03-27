@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, getTierFromPriceId, getPackFromPriceId } from "@/lib/stripe";
 import { upsertSubscription, resetMonthlyTextCredits } from "@/lib/subscription";
-import { updateTier } from "@/lib/credits";
+import { updateTier, addPack } from "@/lib/credits";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -170,7 +170,6 @@ async function handlePackPurchase(
 
   try {
     // Create the pack and transaction directly (no pending transaction lookup)
-    const { addPack } = await import("@/lib/credits");
     const result = await addPack(userId, packType, {
       amountCents: amountTotal ?? 0,
       status: "completed",
