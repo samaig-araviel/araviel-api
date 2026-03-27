@@ -145,9 +145,11 @@ async function handlePackPurchase(
     return;
   }
 
-  // Get the price ID from line items
+  // Get the price ID and amount from line items
   const lineItem = session.line_items?.data[0];
   const priceId = lineItem?.price?.id;
+  const amountTotal = session.amount_total; // in cents
+
   if (!priceId) {
     console.error("[stripe/webhook] pack purchase missing price ID");
     return;
@@ -159,40 +161,23 @@ async function handlePackPurchase(
     return;
   }
 
-  // Update the transaction from pending to completed
-  const { getSupabase } = await import("@/lib/supabase");
-  const sb = getSupabase();
-
-  const now = new Date();
-
-  // Find the transaction for this user and pack type that's still pending
-  const { data: txn, error: txnError } = await sb
-    .from("credit_transactions")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("pack_type", packType)
-    .eq("status", "pending")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (txnError) {
-    console.error("[stripe/webhook] Failed to find pending transaction:", txnError.message);
-    return;
-  }
-
-  // Update transaction to completed
-  await sb
-    .from("credit_transactions")
-    .update({
+  try {
+    // Create the pack and transaction directly (no pending transaction lookup)
+    const { addPack } = await import("@/lib/credits");
+    await addPack(userId, packType, {
+      amountCents: amountTotal ?? 0,
       status: "completed",
-      completed_at: now.toISOString(),
-    })
-    .eq("id", txn.id);
+    });
 
-  console.log(
-    `[stripe/webhook] Pack purchase completed: user=${userId} pack=${packType} transactionId=${txn.id}`
-  );
+    console.log(
+      `[stripe/webhook] Pack purchase completed: user=${userId} pack=${packType} amount=${amountTotal}cents`
+    );
+  } catch (err) {
+    console.error(
+      "[stripe/webhook] Failed to create pack:",
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 async function handleSubscriptionUpdated(
