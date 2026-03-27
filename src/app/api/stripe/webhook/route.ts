@@ -60,9 +60,16 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   } catch (err) {
     // Log but still return 200 to prevent Stripe retries
+    // Include full error context for debugging
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
     console.error(
       `[stripe/webhook] Error processing ${event.type}:`,
-      err instanceof Error ? err.message : err
+      {
+        eventId: event.id,
+        error: errorMessage,
+        stack: errorStack,
+      }
     );
   }
 
@@ -164,19 +171,29 @@ async function handlePackPurchase(
   try {
     // Create the pack and transaction directly (no pending transaction lookup)
     const { addPack } = await import("@/lib/credits");
-    await addPack(userId, packType, {
+    const result = await addPack(userId, packType, {
       amountCents: amountTotal ?? 0,
       status: "completed",
     });
 
     console.log(
-      `[stripe/webhook] Pack purchase completed: user=${userId} pack=${packType} amount=${amountTotal}cents`
+      `[stripe/webhook] Pack purchase completed: user=${userId} pack=${packType} amount=${amountTotal}cents credits=${result.credits} expires=${result.expiresAt}`
     );
   } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
     console.error(
       "[stripe/webhook] Failed to create pack:",
-      err instanceof Error ? err.message : err
+      {
+        userId,
+        packType,
+        amountTotal,
+        error: errorMessage,
+        stack: errorStack,
+      }
     );
+    // Don't re-throw — return 200 to prevent Stripe retries
+    // But the error is logged for manual investigation
   }
 }
 

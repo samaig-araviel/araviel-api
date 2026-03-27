@@ -349,8 +349,18 @@ export async function addPack(
   packType: string,
   options?: { amountCents?: number; status?: "pending" | "completed" }
 ): Promise<{ packId: string; credits: number; expiresAt: string }> {
+  // Validate input
+  if (!userId || typeof userId !== "string") {
+    throw new Error("Invalid userId: must be a non-empty string");
+  }
+  if (!packType || typeof packType !== "string") {
+    throw new Error("Invalid packType: must be a non-empty string");
+  }
+
   const packDef = PACK_DEFINITIONS[packType];
-  if (!packDef) throw new Error(`Unknown pack type: ${packType}`);
+  if (!packDef) {
+    throw new Error(`Invalid pack type: "${packType}". Valid types: ${Object.keys(PACK_DEFINITIONS).join(", ")}`);
+  }
 
   const sb = getSupabase();
   const now = new Date();
