@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripe, getTierFromPriceId } from "@/lib/stripe";
+import { getStripe, getTierFromPriceId, getPackFromPriceId } from "@/lib/stripe";
 import { upsertSubscription, resetMonthlyTextCredits } from "@/lib/subscription";
 import { updateTier } from "@/lib/credits";
 import type Stripe from "stripe";
@@ -80,7 +80,14 @@ async function handleCheckoutCompleted(
     return;
   }
 
-  // Get the subscription to find the price ID
+  const checkoutType = session.metadata?.type;
+
+  // Check if this is a pack purchase (payment mode) or subscription
+  if (checkoutType === "pack") {
+    return handlePackPurchase(session, userId);
+  }
+
+  // Otherwise, handle as subscription
   const stripe = getStripe();
   const subscriptionId = session.subscription as string;
   if (!subscriptionId) return;
@@ -125,6 +132,66 @@ async function handleCheckoutCompleted(
 
   console.log(
     `[stripe/webhook] Checkout completed: user=${userId} tier=${tierInfo.tier} interval=${tierInfo.interval}`
+  );
+}
+
+async function handlePackPurchase(
+  session: Stripe.Checkout.Session,
+  userId: string
+): Promise<void> {
+  const packType = session.metadata?.packType;
+  if (!packType) {
+    console.error("[stripe/webhook] pack purchase missing packType in metadata");
+    return;
+  }
+
+  // Get the price ID from line items
+  const lineItem = session.line_items?.data[0];
+  const priceId = lineItem?.price?.id;
+  if (!priceId) {
+    console.error("[stripe/webhook] pack purchase missing price ID");
+    return;
+  }
+
+  const packInfo = getPackFromPriceId(priceId);
+  if (!packInfo) {
+    console.error("[stripe/webhook] Unknown pack price ID:", priceId);
+    return;
+  }
+
+  // Update the transaction from pending to completed
+  const { getSupabase } = await import("@/lib/supabase");
+  const sb = getSupabase();
+
+  const now = new Date();
+
+  // Find the transaction for this user and pack type that's still pending
+  const { data: txn, error: txnError } = await sb
+    .from("credit_transactions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("pack_type", packType)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (txnError) {
+    console.error("[stripe/webhook] Failed to find pending transaction:", txnError.message);
+    return;
+  }
+
+  // Update transaction to completed
+  await sb
+    .from("credit_transactions")
+    .update({
+      status: "completed",
+      completed_at: now.toISOString(),
+    })
+    .eq("id", txn.id);
+
+  console.log(
+    `[stripe/webhook] Pack purchase completed: user=${userId} pack=${packType} transactionId=${txn.id}`
   );
 }
 
