@@ -346,7 +346,8 @@ export async function chargeCredits(
  */
 export async function addPack(
   userId: string,
-  packType: string
+  packType: string,
+  options?: { amountCents?: number; status?: "pending" | "completed" }
 ): Promise<{ packId: string; credits: number; expiresAt: string }> {
   const packDef = PACK_DEFINITIONS[packType];
   if (!packDef) throw new Error(`Unknown pack type: ${packType}`);
@@ -354,6 +355,8 @@ export async function addPack(
   const sb = getSupabase();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PACK_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+  const amountCents = options?.amountCents ?? 0;
+  const status = options?.status ?? "completed";
 
   // Create transaction record
   const { data: txn, error: txnError } = await sb
@@ -363,9 +366,9 @@ export async function addPack(
       pack_type: packType,
       feature: "image",
       credits: packDef.credits,
-      amount_cents: 0, // Free for now
-      status: "completed",
-      completed_at: now.toISOString(),
+      amount_cents: amountCents,
+      status,
+      completed_at: status === "completed" ? now.toISOString() : null,
     })
     .select("id")
     .single();

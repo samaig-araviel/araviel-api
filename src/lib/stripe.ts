@@ -21,12 +21,19 @@ interface TierInfo {
   interval: "monthly" | "annual";
 }
 
+interface PackInfo {
+  packType: "starter" | "creator" | "studio";
+}
+
 // Sandbox defaults — env vars override these in production
 const SANDBOX_PRICES: Record<string, string> = {
   STRIPE_PRICE_LITE_MONTHLY: "price_1TEzOPDgaoOWbIEAfsQzAeWf",
   STRIPE_PRICE_LITE_ANNUAL: "price_1TEzTRDgaoOWbIEAfIWS9nrC",
   STRIPE_PRICE_PRO_MONTHLY: "price_1TEzRjDgaoOWbIEAxD2w2t0z",
   STRIPE_PRICE_PRO_ANNUAL: "price_1TEzUfDgaoOWbIEAOoeLS3HW",
+  STRIPE_PRICE_IMAGE_STARTER: "price_1TFXpXDgaoOWbIEAXhtRqZcN",
+  STRIPE_PRICE_IMAGE_CREATOR: "price_1TFXtWDgaoOWbIEAtUwv2Rvt",
+  STRIPE_PRICE_IMAGE_STUDIO: "price_1TFYCBDgaoOWbIEA3W9uOIyT",
 };
 
 function getPrice(envKey: string): string | undefined {
@@ -65,6 +72,36 @@ export function getPriceId(
 ): string | null {
   const envKey = `STRIPE_PRICE_${tier.toUpperCase()}_${interval.toUpperCase()}`;
   return getPrice(envKey) ?? null;
+}
+
+/**
+ * Get the Stripe price ID for a credit pack.
+ */
+export function getPackPriceId(packType: string): string | null {
+  const envKey = `STRIPE_PRICE_IMAGE_${packType.toUpperCase()}`;
+  return getPrice(envKey) ?? null;
+}
+
+/**
+ * Look up pack type for a Stripe price ID.
+ */
+export function getPackFromPriceId(priceId: string): PackInfo | null {
+  const map = buildPackPriceMap();
+  return map[priceId] ?? null;
+}
+
+function buildPackPriceMap(): Record<string, PackInfo> {
+  const map: Record<string, PackInfo> = {};
+
+  const starter = getPrice("STRIPE_PRICE_IMAGE_STARTER");
+  const creator = getPrice("STRIPE_PRICE_IMAGE_CREATOR");
+  const studio = getPrice("STRIPE_PRICE_IMAGE_STUDIO");
+
+  if (starter) map[starter] = { packType: "starter" };
+  if (creator) map[creator] = { packType: "creator" };
+  if (studio) map[studio] = { packType: "studio" };
+
+  return map;
 }
 
 // ─── Text Credit Limits (Monthly + 3-hour Window) ──────────────────────────
