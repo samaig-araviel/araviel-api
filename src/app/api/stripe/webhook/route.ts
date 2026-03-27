@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, getTierFromPriceId, getPackFromPriceId } from "@/lib/stripe";
 import { upsertSubscription, resetMonthlyTextCredits } from "@/lib/subscription";
-import { updateTier, addPack } from "@/lib/credits";
+import { updateTier, addPack, PACK_DEFINITIONS } from "@/lib/credits";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -163,21 +163,16 @@ async function handlePackPurchase(
     return;
   }
 
-  // Get the price ID and amount from line items
-  const lineItem = session.line_items?.data[0];
-  const priceId = lineItem?.price?.id;
   const amountTotal = session.amount_total; // in cents
 
-  if (!priceId) {
-    console.error("[stripe/webhook] pack purchase missing price ID");
+  // Validate pack type exists in our definitions
+  const packDef = PACK_DEFINITIONS[packType];
+  if (!packDef) {
+    console.error("[stripe/webhook] Unknown pack type:", packType);
     return;
   }
 
-  const packInfo = getPackFromPriceId(priceId);
-  if (!packInfo) {
-    console.error("[stripe/webhook] Unknown pack price ID:", priceId);
-    return;
-  }
+  console.log("[stripe/webhook] ✅ Pack type validated:", packType, "credits:", packDef.credits);
 
   try {
     console.log("[stripe/webhook] Starting pack purchase for:", { userId, packType, amountTotal });
