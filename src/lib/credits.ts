@@ -349,6 +349,8 @@ export async function addPack(
   packType: string,
   options?: { amountCents?: number; status?: "pending" | "completed" }
 ): Promise<{ packId: string; credits: number; expiresAt: string }> {
+  console.log("[addPack] Starting with:", { userId, packType, options });
+
   // Validate input
   if (!userId || typeof userId !== "string") {
     throw new Error("Invalid userId: must be a non-empty string");
@@ -362,14 +364,26 @@ export async function addPack(
     throw new Error(`Invalid pack type: "${packType}". Valid types: ${Object.keys(PACK_DEFINITIONS).join(", ")}`);
   }
 
+  console.log("[addPack] Validations passed, pack definition:", packDef);
+
   // Ensure account exists FIRST before creating pack records
+  console.log("[addPack] Creating or fetching account for:", userId);
   await getOrCreateAccount(userId);
+  console.log("[addPack] Account ready");
 
   const sb = getSupabase();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PACK_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
   const amountCents = options?.amountCents ?? 0;
   const status = options?.status ?? "completed";
+
+  console.log("[addPack] Creating transaction record with:", {
+    userId,
+    packType,
+    credits: packDef.credits,
+    amountCents,
+    status,
+  });
 
   // Create transaction record
   const { data: txn, error: txnError } = await sb
@@ -386,7 +400,18 @@ export async function addPack(
     .select("id")
     .single();
 
-  if (txnError) throw new Error(`Failed to create transaction: ${txnError.message}`);
+  if (txnError) {
+    console.error("[addPack] ❌ Transaction insert failed:", txnError);
+    throw new Error(`Failed to create transaction: ${txnError.message}`);
+  }
+  console.log("[addPack] ✅ Transaction created with id:", txn.id);
+
+  console.log("[addPack] Creating pack record with:", {
+    userId,
+    transactionId: txn.id,
+    creditsTotal: packDef.credits,
+    expiresAt: expiresAt.toISOString(),
+  });
 
   // Create pack
   const { data: pack, error: packError } = await sb
@@ -403,7 +428,12 @@ export async function addPack(
     .select("id")
     .single();
 
-  if (packError) throw new Error(`Failed to create pack: ${packError.message}`);
+  if (packError) {
+    console.error("[addPack] ❌ Pack insert failed:", packError);
+    throw new Error(`Failed to create pack: ${packError.message}`);
+  }
+
+  console.log("[addPack] ✅ Pack created successfully with id:", pack.id);
 
   return {
     packId: pack.id,

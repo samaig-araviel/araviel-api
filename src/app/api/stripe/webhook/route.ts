@@ -146,6 +146,8 @@ async function handlePackPurchase(
   session: Stripe.Checkout.Session,
   userId: string
 ): Promise<void> {
+  console.log("[stripe/webhook] 🔄 Handling pack purchase for user:", userId);
+
   const packType = session.metadata?.packType;
   if (!packType) {
     console.error("[stripe/webhook] pack purchase missing packType in metadata");
@@ -169,6 +171,8 @@ async function handlePackPurchase(
   }
 
   try {
+    console.log("[stripe/webhook] Starting pack purchase for:", { userId, packType, amountTotal });
+
     // Create the pack and transaction directly (no pending transaction lookup)
     const result = await addPack(userId, packType, {
       amountCents: amountTotal ?? 0,
@@ -176,20 +180,20 @@ async function handlePackPurchase(
     });
 
     console.log(
-      `[stripe/webhook] Pack purchase completed: user=${userId} pack=${packType} amount=${amountTotal}cents credits=${result.credits} expires=${result.expiresAt}`
+      `[stripe/webhook] ✅ Pack purchase SUCCEEDED: user=${userId} pack=${packType} amount=${amountTotal}cents credits=${result.credits} expires=${result.expiresAt}`
     );
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorStack = err instanceof Error ? err.stack : undefined;
     console.error(
-      "[stripe/webhook] Failed to create pack:",
-      {
+      "❌ [stripe/webhook] FAILED to create pack - DETAILS:",
+      JSON.stringify({
         userId,
         packType,
         amountTotal,
         error: errorMessage,
-        stack: errorStack,
-      }
+        stack: errorStack?.split("\n").slice(0, 5).join("\n"), // First 5 lines of stack
+      }, null, 2)
     );
     // Don't re-throw — return 200 to prevent Stripe retries
     // But the error is logged for manual investigation
