@@ -362,6 +362,9 @@ export async function addPack(
     throw new Error(`Invalid pack type: "${packType}". Valid types: ${Object.keys(PACK_DEFINITIONS).join(", ")}`);
   }
 
+  // Ensure account exists FIRST before creating pack records
+  await getOrCreateAccount(userId);
+
   const sb = getSupabase();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PACK_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
@@ -401,9 +404,6 @@ export async function addPack(
     .single();
 
   if (packError) throw new Error(`Failed to create pack: ${packError.message}`);
-
-  // Ensure account exists
-  await getOrCreateAccount(userId);
 
   return {
     packId: pack.id,
