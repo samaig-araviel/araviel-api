@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, getTierFromPriceId } from "@/lib/stripe";
-import { upsertSubscription, resetMonthlyTextCredits } from "@/lib/subscription";
+import {
+  getUserSubscription,
+  upsertSubscription,
+  resetMonthlyTextCredits,
+  resolveFirstMonth,
+} from "@/lib/subscription";
 import { updateTier, addPack, PACK_DEFINITIONS } from "@/lib/credits";
 import { getSupabase } from "@/lib/supabase";
 import { WebhookBadRequestError, WebhookRetryableError } from "@/lib/webhook-errors";
@@ -303,14 +308,21 @@ async function handleSubscriptionUpdated(
       status = "active";
   }
 
-  // Check if this is a renewal (period changed) to flip first_month off
-  const { getUserSubscription } = await import("@/lib/subscription");
+  // Resolve firstMonth via guard-protected logic
   const existing = await getUserSubscription(userId);
   const newPeriodStart = new Date(periodStart * 1000).toISOString();
-  const isRenewal =
-    existing?.firstMonth === true &&
-    existing?.currentPeriodStart !== null &&
-    newPeriodStart !== existing.currentPeriodStart;
+  const newFirstMonth = resolveFirstMonth({
+    isCheckout: false,
+    existing,
+    newPeriodStart,
+  });
+  const isRenewal = existing?.firstMonth === true && newFirstMonth === false;
+
+  if (existing?.firstMonth !== newFirstMonth) {
+    console.log(
+      `[stripe/webhook] firstMonth transition: user=${userId} ${existing?.firstMonth ?? null} → ${newFirstMonth}`
+    );
+  }
 
   try {
     await upsertSubscription({
@@ -323,7 +335,7 @@ async function handleSubscriptionUpdated(
       currentPeriodStart: newPeriodStart,
       currentPeriodEnd: new Date(periodEnd * 1000).toISOString(),
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
-      firstMonth: isRenewal ? false : existing?.firstMonth ?? false,
+      firstMonth: newFirstMonth,
     });
   } catch (err) {
     throw new WebhookRetryableError(
