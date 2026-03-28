@@ -121,6 +121,43 @@ export async function getStripeCustomerId(
   return data?.stripe_customer_id ?? null;
 }
 
+// ─── First-Month Bonus Resolution ─────────────────────────────────────────
+
+/**
+ * Pure function to determine the correct `firstMonth` value for a subscription upsert.
+ *
+ * Rules (evaluated in order):
+ *  1. Checkout events always grant firstMonth (new sub or re-sub).
+ *  2. Guard — once firstMonth is false, only a checkout can re-grant it.
+ *  3. If firstMonth is true and the billing period start changed → renewal → false.
+ *  4. Otherwise preserve the existing value.
+ */
+export function resolveFirstMonth(params: {
+  isCheckout: boolean;
+  existing: Pick<Subscription, "firstMonth" | "currentPeriodStart"> | null;
+  newPeriodStart: string | null;
+}): boolean {
+  const { isCheckout, existing, newPeriodStart } = params;
+
+  // Rule 1: checkout always grants first-month bonus
+  if (isCheckout) return true;
+
+  // Rule 2: guard — once false, only a checkout can flip it back
+  if (!existing || existing.firstMonth === false) return false;
+
+  // Rule 3: renewal — period start changed while still in first month
+  if (
+    existing.currentPeriodStart !== null &&
+    newPeriodStart !== null &&
+    newPeriodStart !== existing.currentPeriodStart
+  ) {
+    return false;
+  }
+
+  // Rule 4: preserve (e.g. mid-cycle upgrade with same period start)
+  return existing.firstMonth;
+}
+
 // ─── Text Credit Functions (Monthly + 3-Hour Window) ───────────────────────
 
 /**
@@ -135,6 +172,12 @@ export async function checkAndConsumeTextCredit(
 ): Promise<TextCreditState> {
   const sb = getSupabase();
   const config = getTextCreditConfig(tier, firstMonth);
+
+  if (firstMonth && config.firstMonthBonus > 0) {
+    console.log(
+      `[subscription] First-month bonus applied: user=${userId} tier=${tier} bonus=${config.firstMonthBonus}`
+    );
+  }
 
   const { data, error } = await sb.rpc("consume_text_credit", {
     p_user_id: userId,
@@ -179,6 +222,12 @@ export async function getTextCreditState(
 ): Promise<Omit<TextCreditState, "allowed" | "reason">> {
   const sb = getSupabase();
   const config = getTextCreditConfig(tier, firstMonth);
+
+  if (firstMonth && config.firstMonthBonus > 0) {
+    console.log(
+      `[subscription] First-month bonus active (read): user=${userId} tier=${tier} bonus=${config.firstMonthBonus}`
+    );
+  }
 
   const { data, error } = await sb.rpc("get_text_credit_state", {
     p_user_id: userId,
