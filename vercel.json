@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/status-check",
-      "schedule": "* * * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
