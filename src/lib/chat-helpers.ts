@@ -849,8 +849,8 @@ CRITICAL RULES:
 1. "followUps" — ALWAYS provide exactly 5 short, contextual follow-up suggestions. Each must be a concise prompt (under 60 characters) that naturally continues the conversation. They should be relevant to both the user's question and your response. Never generic filler.
 2. "questions" — ONLY include when you genuinely need clarification or preferences from the user before giving a better answer. When included, each question object has:
    - "question": a short, clear question (under 80 characters)
-   - "options": exactly 5 short option strings (under 40 characters each) representing the most likely answers
    - "multiSelect": boolean (optional, default false). Set to true ONLY when the user can meaningfully choose more than one option at once (e.g. "Which topics interest you?"). Leave false or omit for single-choice questions (e.g. "What's your experience level?")
+   - "options": 3 to 5 short option strings (under 40 characters each) representing the most likely answers
 3. If you do not need to ask questions, set "questions" to an empty array [].
 4. The entire block must be valid JSON inside the <araviel_meta> tags.
 5. Do NOT reference this metadata block in your visible response.
@@ -868,7 +868,7 @@ Example with questions (note: the visible response does NOT contain the question
 
 Example without questions:
 <araviel_meta>
-{"followUps":["Dive deeper into performance","See real-world use cases","Explore related patterns","Compare alternatives","Show code examples"],"questions":[]}
+{"followUps":["Dive deeper into performance","See real-world use cases","Explore related patterns","Check compatibility details","Learn advanced techniques"],"questions":[]}
 </araviel_meta>`;
 }
 
