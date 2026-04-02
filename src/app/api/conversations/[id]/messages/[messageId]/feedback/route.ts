@@ -52,11 +52,25 @@ export async function POST(
       );
     }
 
-    const { feedback } = body;
+    const { feedback, details, comment } = body;
 
     if (feedback !== null && feedback !== "like" && feedback !== "dislike") {
       return NextResponse.json(
         { error: "Invalid feedback. Must be \"like\", \"dislike\", or null" },
+        { status: 400, headers: corsHeaders(origin) }
+      );
+    }
+
+    if (details !== undefined && details !== null && (!Array.isArray(details) || !details.every((d: unknown) => typeof d === "string"))) {
+      return NextResponse.json(
+        { error: "Invalid details. Must be an array of strings or null" },
+        { status: 400, headers: corsHeaders(origin) }
+      );
+    }
+
+    if (comment !== undefined && comment !== null && typeof comment !== "string") {
+      return NextResponse.json(
+        { error: "Invalid comment. Must be a string or null" },
         { status: 400, headers: corsHeaders(origin) }
       );
     }
@@ -92,6 +106,8 @@ export async function POST(
           message_id: messageId,
           conversation_id: conversationId,
           feedback,
+          details: details || null,
+          comment: comment || null,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "message_id" }

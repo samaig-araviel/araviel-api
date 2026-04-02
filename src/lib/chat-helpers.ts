@@ -842,14 +842,14 @@ At the very end of EVERY response, you MUST append a metadata block. This block 
 
 Format:
 <araviel_meta>
-{"followUps":["suggestion 1","suggestion 2","suggestion 3"],"questions":[]}
+{"followUps":["suggestion 1","suggestion 2","suggestion 3","suggestion 4","suggestion 5"],"questions":[]}
 </araviel_meta>
 
 CRITICAL RULES:
-1. "followUps" — ALWAYS provide exactly 3 short, contextual follow-up suggestions. Each must be a concise prompt (under 60 characters) that naturally continues the conversation. They should be relevant to both the user's question and your response. Never generic filler.
+1. "followUps" — ALWAYS provide exactly 5 short, contextual follow-up suggestions. Each must be a concise prompt (under 60 characters) that naturally continues the conversation. They should be relevant to both the user's question and your response. Never generic filler.
 2. "questions" — ONLY include when you genuinely need clarification or preferences from the user before giving a better answer. When included, each question object has:
    - "question": a short, clear question (under 80 characters)
-   - "options": exactly 3 short option strings (under 40 characters each) representing the most likely answers
+   - "options": 3 to 5 short option strings (under 40 characters each) representing the most likely answers
 3. If you do not need to ask questions, set "questions" to an empty array [].
 4. The entire block must be valid JSON inside the <araviel_meta> tags.
 5. Do NOT reference this metadata block in your visible response.
@@ -862,12 +862,12 @@ CRITICAL RULES:
 
 Example with questions (note: the visible response does NOT contain the questions):
 <araviel_meta>
-{"followUps":["Compare with alternatives","Show a practical example","Explain the trade-offs"],"questions":[{"question":"What's your experience level?","options":["Beginner","Intermediate","Advanced"]},{"question":"Which language do you prefer?","options":["Python","JavaScript","TypeScript"]}]}
+{"followUps":["Compare with alternatives","Show a practical example","Explain the trade-offs","See performance benchmarks","Review best practices"],"questions":[{"question":"What's your experience level?","options":["Beginner","Intermediate","Advanced"]},{"question":"Which language do you prefer?","options":["Python","JavaScript","TypeScript","Go","Rust"]}]}
 </araviel_meta>
 
 Example without questions:
 <araviel_meta>
-{"followUps":["Dive deeper into performance","See real-world use cases","Explore related patterns"],"questions":[]}
+{"followUps":["Dive deeper into performance","See real-world use cases","Explore related patterns","Check compatibility details","Learn advanced techniques"],"questions":[]}
 </araviel_meta>`;
 }
 
