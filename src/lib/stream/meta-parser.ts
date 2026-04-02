@@ -84,6 +84,7 @@ function validateQuestions(raw: unknown): FollowUpQuestion[] {
         .filter((o): o is string => typeof o === "string" && o.trim().length > 0)
         .slice(0, 5)
         .map((s) => s.trim()),
+      multiSelect: (item as Record<string, unknown>).multiSelect === true,
     }))
     .filter((q) => q.options.length > 0);
 }

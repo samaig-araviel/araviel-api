@@ -849,6 +849,7 @@ CRITICAL RULES:
 1. "followUps" — ALWAYS provide exactly 5 short, contextual follow-up suggestions. Each must be a concise prompt (under 60 characters) that naturally continues the conversation. They should be relevant to both the user's question and your response. Never generic filler.
 2. "questions" — ONLY include when you genuinely need clarification or preferences from the user before giving a better answer. When included, each question object has:
    - "question": a short, clear question (under 80 characters)
+   - "multiSelect": boolean (optional, default false). Set to true ONLY when the user can meaningfully choose more than one option at once (e.g. "Which topics interest you?"). Leave false or omit for single-choice questions (e.g. "What's your experience level?")
    - "options": 3 to 5 short option strings (under 40 characters each) representing the most likely answers
 3. If you do not need to ask questions, set "questions" to an empty array [].
 4. The entire block must be valid JSON inside the <araviel_meta> tags.
@@ -858,11 +859,11 @@ CRITICAL RULES:
    - Put them ONLY in the "questions" array inside the metadata block.
    - Do NOT write the questions, choices, options, or bullet-point lists of choices in your visible response text.
    - Your visible response should end BEFORE any questions. Just provide your answer/analysis, then put questions exclusively in the metadata.
-   - For example, instead of writing "Would you like me to: (a) do X, (b) do Y, (c) do Z?" in the response, just end the response after your analysis and put {"question":"What would you like next?","options":["Do X","Do Y","Do Z"]} in the questions array.
+   - For example, instead of writing "Would you like me to: (a) do X, (b) do Y, (c) do Z?" in the response, just end the response after your analysis and put {"question":"What would you like next?","options":["Do X","Do Y","Do Z","Do W","Do V"]} in the questions array.
 
 Example with questions (note: the visible response does NOT contain the questions):
 <araviel_meta>
-{"followUps":["Compare with alternatives","Show a practical example","Explain the trade-offs","See performance benchmarks","Review best practices"],"questions":[{"question":"What's your experience level?","options":["Beginner","Intermediate","Advanced"]},{"question":"Which language do you prefer?","options":["Python","JavaScript","TypeScript","Go","Rust"]}]}
+{"followUps":["Compare with alternatives","Show a practical example","Explain the trade-offs","See benchmarks","Read case studies"],"questions":[{"question":"What's your experience level?","options":["Beginner","Intermediate","Advanced","Expert","Just browsing"]},{"question":"Which languages interest you?","options":["Python","JavaScript","TypeScript","Go","Rust"],"multiSelect":true}]}
 </araviel_meta>
 
 Example without questions:
