@@ -852,7 +852,7 @@ async function handleChat(
           await sendSSE(writer, encoder, {
             type: "error",
             data: {
-              message: `Both primary and backup models failed. ${backupResult.error || 'Please try again.'}`,
+              message: backupResult.error || "Something went wrong. Please try again.",
               code: "ALL_PROVIDERS_FAILED",
             },
           });
@@ -894,7 +894,7 @@ async function handleChat(
         await sendSSE(writer, encoder, {
           type: "error",
           data: {
-            message: "Provider failed and no backup model is available.",
+            message: "Something went wrong. Please try again.",
             code: "PROVIDER_ERROR",
           },
         });
@@ -1336,27 +1336,27 @@ async function streamFromProvider(
  * when the user selected a different provider, because backup/fallback models may
  * come from different providers.
  */
-function sanitizeProviderError(rawError: string, provider: string): string {
+function sanitizeProviderError(rawError: string, _provider: string): string {
   const lower = rawError.toLowerCase();
 
   // Credit / billing errors
   if (lower.includes("credit balance") || lower.includes("billing") || lower.includes("insufficient") || lower.includes("quota")) {
-    return `The ${provider} provider returned a billing or quota error. Please try again later.`;
+    return "A service billing issue occurred. Please try again later.";
   }
 
   // Rate limiting
   if (lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("429")) {
-    return `The ${provider} provider is rate-limited. Please try again in a moment.`;
+    return "The service is temporarily busy. Please try again in a moment.";
   }
 
   // Authentication errors
   if (lower.includes("unauthorized") || lower.includes("authentication") || lower.includes("api key") || lower.includes("401") || lower.includes("403")) {
-    return `Authentication error with the ${provider} provider. Please try again later.`;
+    return "A service configuration issue occurred. Please try again later.";
   }
 
   // Model not found / unsupported
   if (lower.includes("not found") || lower.includes("does not exist") || lower.includes("unsupported model")) {
-    return `The requested model is not available from ${provider}. Please try a different model.`;
+    return "The requested model is currently unavailable. Please try a different model.";
   }
 
   // Content policy / safety
@@ -1366,11 +1366,11 @@ function sanitizeProviderError(rawError: string, provider: string): string {
 
   // Overloaded / server errors
   if (lower.includes("overloaded") || lower.includes("server error") || lower.includes("500") || lower.includes("503")) {
-    return `The ${provider} provider is temporarily unavailable. Please try again.`;
+    return "The service is temporarily unavailable. Please try again.";
   }
 
   // Generic fallback — don't leak raw error details
-  return "An unexpected error occurred. Please try again.";
+  return "Something went wrong. Please try again.";
 }
 
 async function finalize(
