@@ -1303,15 +1303,19 @@ async function streamFromProvider(
     };
   } catch (err) {
     const latencyMs = Date.now() - start;
-    const errorMessage = err instanceof Error ? err.message : "Unknown provider error";
+    const rawError = err instanceof Error ? err.message : "Unknown provider error";
 
+    // Log the raw error for debugging
     apiCallLogs.push({
       provider: model.provider,
       modelId: model.id,
       statusCode: 500,
       latencyMs,
-      errorMessage,
+      errorMessage: rawError,
     });
+
+    // Return a sanitized, provider-agnostic error message to the user
+    const userFacingError = sanitizeProviderError(rawError, model.provider);
 
     return {
       success: false,
@@ -1321,9 +1325,52 @@ async function streamFromProvider(
       usage,
       latencyMs,
       webSearchUsed,
-      error: errorMessage,
+      error: userFacingError,
     };
   }
+}
+
+/**
+ * Sanitize raw provider error messages to be user-friendly and provider-agnostic.
+ * Raw API errors may reference specific provider names (e.g. "Anthropic API") even
+ * when the user selected a different provider, because backup/fallback models may
+ * come from different providers.
+ */
+function sanitizeProviderError(rawError: string, provider: string): string {
+  const lower = rawError.toLowerCase();
+
+  // Credit / billing errors
+  if (lower.includes("credit balance") || lower.includes("billing") || lower.includes("insufficient") || lower.includes("quota")) {
+    return `The ${provider} provider returned a billing or quota error. Please try again later.`;
+  }
+
+  // Rate limiting
+  if (lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("429")) {
+    return `The ${provider} provider is rate-limited. Please try again in a moment.`;
+  }
+
+  // Authentication errors
+  if (lower.includes("unauthorized") || lower.includes("authentication") || lower.includes("api key") || lower.includes("401") || lower.includes("403")) {
+    return `Authentication error with the ${provider} provider. Please try again later.`;
+  }
+
+  // Model not found / unsupported
+  if (lower.includes("not found") || lower.includes("does not exist") || lower.includes("unsupported model")) {
+    return `The requested model is not available from ${provider}. Please try a different model.`;
+  }
+
+  // Content policy / safety
+  if (lower.includes("content policy") || lower.includes("safety") || lower.includes("blocked")) {
+    return "Your request was blocked by the model's content policy. Please rephrase and try again.";
+  }
+
+  // Overloaded / server errors
+  if (lower.includes("overloaded") || lower.includes("server error") || lower.includes("500") || lower.includes("503")) {
+    return `The ${provider} provider is temporarily unavailable. Please try again.`;
+  }
+
+  // Generic fallback — don't leak raw error details
+  return "An unexpected error occurred. Please try again.";
 }
 
 async function finalize(
