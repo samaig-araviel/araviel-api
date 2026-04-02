@@ -501,6 +501,9 @@ async function handleChat(
             data: {
               message: `Retrying with backup model ${backup.name}...`,
               code: "PROVIDER_RETRY",
+              fromModel: model.name,
+              toModel: backup.name,
+              reason: "Image generation failed, retrying with backup",
             },
           });
 
@@ -617,6 +620,9 @@ async function handleChat(
           data: {
             message: `${model.name} cannot generate images. Switching to ${imageBackup.name}...`,
             code: "PROVIDER_RETRY",
+            fromModel: model.name,
+            toModel: imageBackup.name,
+            reason: "This model doesn't support image generation",
           },
         });
 
@@ -821,6 +827,9 @@ async function handleChat(
           data: {
             message: `Retrying with backup model ${backup.name}...`,
             code: "PROVIDER_RETRY",
+            fromModel: model.name,
+            toModel: backup.name,
+            reason: "The primary model encountered an error",
           },
         });
 
@@ -1024,6 +1033,9 @@ async function tryDedicatedImageFallback(
         data: {
           message: `${originalModel.name} cannot generate images. Using ${imgModel.name} instead...`,
           code: "PROVIDER_RETRY",
+          fromModel: originalModel.name,
+          toModel: imgModel.name,
+          reason: "This model doesn't support image generation",
         },
       });
 
