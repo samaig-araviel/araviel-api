@@ -61,7 +61,7 @@ function validateFollowUps(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    .slice(0, 3)
+    .slice(0, 5)
     .map((s) => s.trim());
 }
 
@@ -82,8 +82,9 @@ function validateQuestions(raw: unknown): FollowUpQuestion[] {
       question: (item.question as string).trim(),
       options: (item.options as unknown[])
         .filter((o): o is string => typeof o === "string" && o.trim().length > 0)
-        .slice(0, 3)
+        .slice(0, 5)
         .map((s) => s.trim()),
+      multiSelect: (item as Record<string, unknown>).multiSelect === true,
     }))
     .filter((q) => q.options.length > 0);
 }

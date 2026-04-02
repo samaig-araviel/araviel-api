@@ -144,6 +144,7 @@ export type SSEEventType =
 export interface FollowUpQuestion {
   question: string;
   options: string[];
+  multiSelect?: boolean;
 }
 
 export interface SSEFollowUpsData {
