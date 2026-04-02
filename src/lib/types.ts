@@ -135,6 +135,7 @@ export type SSEEventType =
   | "citations"
   | "tool_use"
   | "image_generation"
+  | "research_status"
   | "followups"
   | "questions"
   | "done"

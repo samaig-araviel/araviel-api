@@ -1,7 +1,7 @@
 import type { ConversationMessage, Citation, TokenUsage } from "@/lib/types";
 
 export interface ProviderStreamEvent {
-  type: "delta" | "thinking" | "citations" | "tool_use" | "image_generation" | "done" | "error";
+  type: "delta" | "thinking" | "citations" | "tool_use" | "image_generation" | "research_status" | "done" | "error";
   content?: string;
   citations?: Citation[];
   tool?: string;
@@ -10,6 +10,10 @@ export interface ProviderStreamEvent {
   webSearchUsed?: boolean;
   error?: string;
   imageUrl?: string;
+  /** Deep research progress fields */
+  researchStatus?: string;
+  researchSources?: number;
+  researchActions?: Array<{ type: string; query?: string; url?: string }>;
 }
 
 export interface ProviderConfig {
