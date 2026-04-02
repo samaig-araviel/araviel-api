@@ -151,23 +151,40 @@ export class OpenAIProvider implements AIProvider {
    * Non-streaming code path for deep research models.
    *
    * Deep research models always require `web_search_preview` and do not support
-   * streaming.  The full response is awaited, then parsed into the same
-   * `ProviderStreamEvent` sequence that the streaming path produces.
+   * streaming.  The job is submitted with `background: true` (returns immediately),
+   * then polled via `responses.retrieve()` until it reaches a terminal state.
+   * This avoids blocking the serverless function for the full research duration
+   * (which can be 2-10+ minutes).
    */
   private async *streamDeepResearch(
     config: ProviderConfig,
   ): AsyncGenerator<ProviderStreamEvent> {
     const tools: OpenAI.Responses.Tool[] = [{ type: "web_search_preview" }];
 
-    const response = await this.client.responses.create({
+    // Submit as a background job — returns immediately with status "queued"
+    let response = await this.client.responses.create({
       model: config.modelId,
       input: buildInput(config.messages),
       instructions: config.systemPrompt,
       stream: false,
       tools,
       reasoning: { summary: "auto" },
-    } as OpenAI.Responses.ResponseCreateParamsNonStreaming & { reasoning: { summary: string } });
+      background: true,
+    });
 
+    // Poll until the research reaches a terminal state
+    const POLL_INTERVAL_MS = 2_000;
+    while (response.status === "queued" || response.status === "in_progress") {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      response = await this.client.responses.retrieve(response.id);
+    }
+
+    if (response.status !== "completed") {
+      const errMsg = response.error?.message ?? `Research ${response.status}`;
+      throw new Error(errMsg);
+    }
+
+    // Parse the completed response into the same event format as the streaming path
     const usage: TokenUsage = {
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,
@@ -184,11 +201,10 @@ export class OpenAIProvider implements AIProvider {
         webSearchUsed = true;
       }
 
-      // Extract reasoning summaries
       if (item.type === "reasoning") {
-        const summaries = (item as typeof item & { summary?: Array<{ type: string; text: string }> }).summary;
-        if (Array.isArray(summaries)) {
-          for (const s of summaries) {
+        const reasoningItem = item as typeof item & { summary?: Array<{ type: string; text: string }> };
+        if (Array.isArray(reasoningItem.summary)) {
+          for (const s of reasoningItem.summary) {
             if (s.type === "summary_text" && s.text) {
               yield { type: "thinking", content: s.text };
             }
@@ -196,7 +212,6 @@ export class OpenAIProvider implements AIProvider {
         }
       }
 
-      // Extract final message text and citations
       if (item.type === "message" && item.content) {
         for (const part of item.content) {
           if (part.type === "output_text") {
