@@ -31,6 +31,7 @@ import {
   isImageGenerationModel,
   canModelGenerateImages,
   getImageCapableModels,
+  getDeepResearchInstructions,
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
@@ -385,7 +386,13 @@ async function handleChat(
     }
 
     const includeFileInstructions = detectFileIntent(chatReq.message);
-    const systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions, userSettings });
+    let systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions, userSettings });
+
+    // Append deep research instructions when using a deep research model
+    if (model.id === "o3-deep-research" || model.id === "o4-mini-deep-research") {
+      systemPrompt += getDeepResearchInstructions();
+    }
+
     const enableWebSearch = shouldUseWebSearch;
     const enableThinking = shouldEnableThinking(adeResponse.analysis);
 
@@ -1252,6 +1259,16 @@ async function streamFromProvider(
             });
             content += `\n![Generated image: ${userPrompt.slice(0, 100)}](${nativeImageUrl})\n`;
           }
+          break;
+        case "research_status":
+          await sendSSE(writer, encoder, {
+            type: "research_status",
+            data: {
+              status: event.researchStatus,
+              sources: event.researchSources ?? 0,
+              actions: event.researchActions ?? [],
+            },
+          });
           break;
         case "tool_use":
           await sendSSE(writer, encoder, {

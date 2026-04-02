@@ -153,8 +153,9 @@ export class OpenAIProvider implements AIProvider {
    * Deep research models always require `web_search_preview` and do not support
    * streaming.  The job is submitted with `background: true` (returns immediately),
    * then polled via `responses.retrieve()` until it reaches a terminal state.
-   * This avoids blocking the serverless function for the full research duration
-   * (which can be 2-10+ minutes).
+   *
+   * During polling, research_status events are emitted so the frontend can show
+   * live progress (similar to how ChatGPT shows "Searching...", "Reading...", etc).
    */
   private async *streamDeepResearch(
     config: ProviderConfig,
@@ -172,17 +173,74 @@ export class OpenAIProvider implements AIProvider {
       background: true,
     });
 
-    // Poll until the research reaches a terminal state
+    // Emit initial queued status so the frontend immediately shows progress
+    yield {
+      type: "research_status",
+      researchStatus: "queued",
+      researchSources: 0,
+      researchActions: [],
+    };
+
+    // Poll until the research reaches a terminal state, emitting progress on each poll
     const POLL_INTERVAL_MS = 2_000;
+    let previousOutputLength = 0;
+    let totalSources = 0;
+    const seenActions: Array<{ type: string; query?: string; url?: string }> = [];
+
     while (response.status === "queued" || response.status === "in_progress") {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       response = await this.client.responses.retrieve(response.id);
+
+      // Extract new output items added since last poll for progress reporting
+      const output = (response as unknown as { output?: Array<Record<string, unknown>> }).output ?? [];
+      if (output.length > previousOutputLength) {
+        for (let i = previousOutputLength; i < output.length; i++) {
+          const item = output[i] as Record<string, unknown>;
+          if (item.type === "web_search_call") {
+            totalSources++;
+            const action: { type: string; query?: string; url?: string } = { type: "search" };
+            // Extract search action details — the item may have action.query or action.url
+            const actionData = item.action as Record<string, unknown> | undefined;
+            if (actionData) {
+              if (actionData.query) action.query = String(actionData.query);
+              if (actionData.url) action.url = String(actionData.url);
+            }
+            seenActions.push(action);
+          }
+        }
+        previousOutputLength = output.length;
+      }
+
+      // Determine human-readable status phase
+      let statusPhase: string;
+      if (response.status === "queued") {
+        statusPhase = "queued";
+      } else if (totalSources === 0) {
+        statusPhase = "planning";
+      } else {
+        statusPhase = "researching";
+      }
+
+      yield {
+        type: "research_status",
+        researchStatus: statusPhase,
+        researchSources: totalSources,
+        researchActions: seenActions.slice(-5), // Send last 5 actions for UI display
+      };
     }
 
     if (response.status !== "completed") {
       const errMsg = response.error?.message ?? `Research ${response.status}`;
       throw new Error(errMsg);
     }
+
+    // Emit a final "synthesizing" status before parsing results
+    yield {
+      type: "research_status",
+      researchStatus: "synthesizing",
+      researchSources: totalSources,
+      researchActions: [],
+    };
 
     // Parse the completed response into the same event format as the streaming path
     const usage: TokenUsage = {
