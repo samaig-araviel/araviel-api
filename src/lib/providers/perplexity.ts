@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { AIProvider, ProviderConfig, ProviderStreamEvent } from "./base";
 import type { Citation, ConversationMessage, TokenUsage } from "@/lib/types";
+import { ThinkTagParser } from "@/lib/stream/think-tag-parser";
 
 function buildMessages(
   systemPrompt: string,
@@ -47,11 +48,14 @@ export class PerplexityProvider implements AIProvider {
     };
 
     const collectedCitations: Citation[] = [];
+    const thinkParser = new ThinkTagParser();
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
       if (delta?.content) {
-        yield { type: "delta", content: delta.content };
+        for (const parsed of thinkParser.push(delta.content)) {
+          yield { type: parsed.type, content: parsed.content };
+        }
       }
 
       if (chunk.usage) {
@@ -65,6 +69,11 @@ export class PerplexityProvider implements AIProvider {
           collectedCitations.push({ url: cite, title: cite });
         }
       }
+    }
+
+    // Flush any remaining buffered content from the think-tag parser
+    for (const parsed of thinkParser.flush()) {
+      yield { type: parsed.type, content: parsed.content };
     }
 
     // Perplexity always uses web search — it's built into the service
