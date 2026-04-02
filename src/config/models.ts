@@ -21,6 +21,8 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "o3": { inputPerMillion: 2, outputPerMillion: 8 },
   "o3-pro": { inputPerMillion: 20, outputPerMillion: 80 },
   "o4-mini": { inputPerMillion: 1.1, outputPerMillion: 4.4 },
+  "o3-deep-research": { inputPerMillion: 10, outputPerMillion: 40 },
+  "o4-mini-deep-research": { inputPerMillion: 2, outputPerMillion: 8 },
 
   // Anthropic
   "claude-opus-4-6": { inputPerMillion: 5, outputPerMillion: 25 },

@@ -27,6 +27,16 @@ const IMAGE_GEN_TOOL_MODELS = new Set([
   "o3",
 ]);
 
+/**
+ * Deep research models require `web_search_preview` tool and do NOT support
+ * streaming.  They use the same Responses API but with `stream: false` and
+ * `reasoning.summary` for intermediate reasoning output.
+ */
+const DEEP_RESEARCH_MODELS = new Set([
+  "o3-deep-research",
+  "o4-mini-deep-research",
+]);
+
 function buildInput(
   messages: ConversationMessage[]
 ): OpenAI.Responses.ResponseInputItem[] {
@@ -47,6 +57,11 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async *stream(config: ProviderConfig): AsyncGenerator<ProviderStreamEvent> {
+    if (DEEP_RESEARCH_MODELS.has(config.modelId)) {
+      yield* this.streamDeepResearch(config);
+      return;
+    }
+
     const tools: OpenAI.Responses.Tool[] = [];
     if (config.enableWebSearch) {
       tools.push({ type: "web_search_preview" });
@@ -130,5 +145,91 @@ export class OpenAIProvider implements AIProvider {
         yield { type: "done", usage, webSearchUsed };
       }
     }
+  }
+
+  /**
+   * Non-streaming code path for deep research models.
+   *
+   * Deep research models always require `web_search_preview` and do not support
+   * streaming.  The full response is awaited, then parsed into the same
+   * `ProviderStreamEvent` sequence that the streaming path produces.
+   */
+  private async *streamDeepResearch(
+    config: ProviderConfig,
+  ): AsyncGenerator<ProviderStreamEvent> {
+    const tools: OpenAI.Responses.Tool[] = [{ type: "web_search_preview" }];
+
+    const response = await this.client.responses.create({
+      model: config.modelId,
+      input: buildInput(config.messages),
+      instructions: config.systemPrompt,
+      stream: false,
+      tools,
+      reasoning: { summary: "auto" },
+    } as OpenAI.Responses.ResponseCreateParamsNonStreaming & { reasoning: { summary: string } });
+
+    const usage: TokenUsage = {
+      inputTokens: response.usage?.input_tokens ?? 0,
+      outputTokens: response.usage?.output_tokens ?? 0,
+      reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? 0,
+      cachedTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
+    };
+
+    const collectedCitations: Citation[] = [];
+    let fullText = "";
+    let webSearchUsed = false;
+
+    for (const item of response.output ?? []) {
+      if (item.type === "web_search_call") {
+        webSearchUsed = true;
+      }
+
+      // Extract reasoning summaries
+      if (item.type === "reasoning") {
+        const summaries = (item as typeof item & { summary?: Array<{ type: string; text: string }> }).summary;
+        if (Array.isArray(summaries)) {
+          for (const s of summaries) {
+            if (s.type === "summary_text" && s.text) {
+              yield { type: "thinking", content: s.text };
+            }
+          }
+        }
+      }
+
+      // Extract final message text and citations
+      if (item.type === "message" && item.content) {
+        for (const part of item.content) {
+          if (part.type === "output_text") {
+            fullText += part.text;
+            if (part.annotations) {
+              for (const ann of part.annotations) {
+                if (ann.type === "url_citation") {
+                  const citation = ann as typeof ann & { snippet?: string };
+                  collectedCitations.push({
+                    url: ann.url,
+                    title: ann.title ?? ann.url,
+                    snippet: citation.snippet,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (fullText) {
+      yield { type: "delta", content: fullText };
+    }
+
+    if (collectedCitations.length > 0 || webSearchUsed) {
+      usage.webSearchRequests = 1;
+    }
+
+    if (collectedCitations.length > 0) {
+      yield { type: "citations", citations: collectedCitations };
+    }
+
+    yield { type: "done", usage, webSearchUsed: collectedCitations.length > 0 || webSearchUsed };
   }
 }
