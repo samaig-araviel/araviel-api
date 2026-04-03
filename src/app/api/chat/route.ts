@@ -22,6 +22,7 @@ import {
   buildSystemPrompt,
   getUserSettingsForChat,
   detectFileIntent,
+  detectPeriodicTableRequest,
   getProjectInstructionsForConversation,
   resolveWebSearch,
   shouldEnableThinking,
@@ -322,7 +323,18 @@ async function handleChat(
       return;
     }
 
-    const { model, backupModels, isManualSelection } = resolved;
+    let { model, backupModels, isManualSelection } = resolved;
+
+    // 8b. Override model for periodic table requests → Claude Opus 4.6
+    if (!isManualSelection && detectPeriodicTableRequest(chatReq.message)) {
+      model = {
+        id: "claude-opus-4-6",
+        name: "Claude Opus 4.6",
+        provider: "anthropic",
+        score: 100,
+        reasoning: "Periodic table request routed to Claude Opus 4.6 for reliable artifact generation",
+      };
+    }
 
     // 9. Generate messageId in memory — no DB insert yet
     const messageId = randomUUID();
