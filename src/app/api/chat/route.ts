@@ -245,17 +245,21 @@ async function handleChat(
     // 6. Detect available providers and call ADE
     const availableProviders = getAvailableProviders();
 
-    // Build humanContext and constraints based on frontend fields
+    // Map frontend autoStrategy to ADE qualityTier and build supporting params
+    const STRATEGY_TO_TIER: Record<string, string> = {
+      default: "auto",
+      costEfficient: "speed",
+      taskBased: "balanced",
+      humanFactors: "quality",
+    };
+
+    const qualityTier = STRATEGY_TO_TIER[chatReq.autoStrategy ?? "default"] ?? "auto";
+
+    // Build humanContext — always send when mood/tone/weather are available.
+    // Quality tier benefits most from human context, but all tiers can use it.
     let humanContext: { emotionalState?: { mood?: string }; environmentalContext?: { weather?: string }; preferences?: { tone?: string } } | undefined;
-    let constraints: { maxCostPer1kTokens?: number } | undefined;
 
-    const shouldSendHumanContext =
-      chatReq.autoStrategy === "humanFactors" ||
-      chatReq.tone ||
-      chatReq.mood ||
-      chatReq.weather;
-
-    if (shouldSendHumanContext && chatReq.autoStrategy !== "taskBased") {
+    if (chatReq.mood || chatReq.weather || chatReq.tone) {
       humanContext = {};
       if (chatReq.mood) {
         humanContext.emotionalState = { mood: chatReq.mood };
@@ -268,8 +272,11 @@ async function handleChat(
       }
     }
 
-    if (chatReq.autoStrategy === "costEfficient") {
-      constraints = { maxCostPer1kTokens: 0.005 };
+    // Build constraints — Speed tier applies hard cost and latency caps
+    let constraints: { maxCostPer1kTokens?: number; maxLatencyMs?: number } | undefined;
+
+    if (qualityTier === "speed") {
+      constraints = { maxCostPer1kTokens: 0.005, maxLatencyMs: 3000 };
     }
 
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
@@ -285,6 +292,7 @@ async function handleChat(
       constraints,
       tone: chatReq.tone,
       conversationHasImages: chatReq.conversationHasImages,
+      qualityTier,
     });
 
     // 7. Check for fallback (unsupported task)

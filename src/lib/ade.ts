@@ -13,6 +13,7 @@ interface ADEHumanContext {
 
 interface ADEConstraints {
   maxCostPer1kTokens?: number;
+  maxLatencyMs?: number;
 }
 
 interface ADERequest {
@@ -25,6 +26,7 @@ interface ADERequest {
   constraints?: ADEConstraints;
   tone?: string;
   conversationHasImages?: boolean;
+  qualityTier?: string;
 }
 
 interface ADECallResult {
@@ -85,6 +87,10 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
 
   if (request.conversationHasImages) {
     body.conversationHasImages = true;
+  }
+
+  if (request.qualityTier) {
+    body.qualityTier = request.qualityTier;
   }
 
   let lastError: Error | null = null;
