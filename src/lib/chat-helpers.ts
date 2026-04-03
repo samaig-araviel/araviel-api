@@ -1022,12 +1022,6 @@ export function detectFileIntent(message: string): boolean {
   return FILE_INTENT_PATTERNS.test(message);
 }
 
-const PERIODIC_TABLE_RE = /periodic\s+table/i;
-
-export function detectPeriodicTableRequest(message: string): boolean {
-  return PERIODIC_TABLE_RE.test(message);
-}
-
 export function findSupportedBackup(
   backupModels: ModelInfo[]
 ): ModelInfo | undefined {
