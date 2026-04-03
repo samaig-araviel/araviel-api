@@ -638,13 +638,19 @@ Example:
 ]
 \`\`\`
 
-**Era-grouped format** (for richer timelines with 6+ events spanning multiple periods): JSON object with "eras" array. Each era has a name, color, and events. This renders with color-coded cards, era labels, and an alternating left/right layout on desktop.
+**Era-grouped format** (for richer timelines with 6+ events spanning multiple periods): JSON object with "eras" array. Each era has a name, color, and events. Choose a "style" to control the visual appearance — vary the style based on the content so timelines feel unique and appropriate to their subject.
 
-Example:
+Three styles are available:
+
+- **"editorial"** (default): Clean left-aligned flowing text with colored dots and era name labels. Best for historical events, biographies, general chronologies.
+- **"cards"**: Center-line alternating cards on desktop with subtle tinted backgrounds. Best for project milestones, product launches, comparative timelines where visual weight helps.
+- **"compact"**: Dense single-column with tighter spacing. Best for day-by-day or hour-by-hour events, detailed sequences within a short timeframe.
+
+Example (editorial style):
 \`\`\`timeline
 {
   "title": "History of Computing",
-  "layout": "alternating",
+  "style": "editorial",
   "eras": [
     {
       "name": "Mechanical Era",
@@ -666,15 +672,34 @@ Example:
 }
 \`\`\`
 
+Example (compact style with sublabels):
+\`\`\`timeline
+{
+  "title": "Easter Weekend",
+  "style": "compact",
+  "eras": [
+    {
+      "name": "Friday — The Crucifixion",
+      "color": "#EF4444",
+      "events": [
+        {"date": "Morning", "title": "Trial before Pilate", "description": "Jesus is condemned to death", "sublabel": "John 18:28-40"},
+        {"date": "~9 AM", "title": "Crucifixion", "description": "Jesus is crucified at Golgotha", "sublabel": "Mark 15:25"}
+      ]
+    }
+  ]
+}
+\`\`\`
+
 Rules:
 - Use when showing 3–15 chronological or sequential events.
 - "date" or "label" is required as the timeline marker (short, under 20 characters).
 - "title" is the event heading (under 60 characters).
 - "description" is optional additional context (under 150 characters).
+- "sublabel" is optional metadata — location, scripture reference, source citation (under 60 characters).
 - Order items chronologically.
 - Use the eras format when events span multiple distinct periods or categories, when color grouping would improve comprehension, or when there are 6+ events that benefit from visual organization.
 - Choose distinct, visually appealing hex colors for each era. Good defaults: #8B5CF6 (purple), #D97706 (amber), #0EA5E9 (sky blue), #10B981 (emerald), #F43F5E (rose), #06B6D4 (cyan).
-- Set "layout": "alternating" for a visually rich alternating left/right layout on desktop.
+- IMPORTANT: Vary the style based on content. Do not always use the same style. Choose the style that best fits the timeline's nature and density.
 
 ### Comparison Block
 Use \`\`\`comparison for side-by-side feature comparisons, pros/cons, tool evaluations, or option analysis.
