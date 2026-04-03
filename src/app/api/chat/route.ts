@@ -72,10 +72,13 @@ export async function POST(request: NextRequest) {
   });
 
   handleChat(request, writer, encoder, user).catch(async (err) => {
+    const rawMessage = err instanceof Error ? err.message : "Unknown error";
+    console.error("[chat] Unhandled error in handleChat:", rawMessage, err instanceof Error ? err.stack : "");
+
     const errorEvent: StreamEvent = {
       type: "error",
       data: {
-        message: err instanceof Error ? err.message : "Internal server error",
+        message: "Something unexpected happened. Please try again.",
         code: "INTERNAL_ERROR",
       },
     };
@@ -248,15 +251,13 @@ async function handleChat(
     // Map frontend autoStrategy to ADE routing strategy
     const STRATEGY_MAP: Record<string, string> = {
       default: "auto",
-      costEfficient: "speed",
       taskBased: "balanced",
       humanFactors: "quality",
     };
 
     const strategy = STRATEGY_MAP[chatReq.autoStrategy ?? "default"] ?? "auto";
 
-    // Build humanContext — always send when mood/tone/weather are available.
-    // All strategies benefit from human context when present.
+    // Build humanContext when mood/tone/weather are available
     let humanContext: { emotionalState?: { mood?: string }; environmentalContext?: { weather?: string }; preferences?: { tone?: string } } | undefined;
 
     if (chatReq.mood || chatReq.weather || chatReq.tone) {
@@ -271,11 +272,6 @@ async function handleChat(
         humanContext.preferences = { tone: chatReq.tone };
       }
     }
-
-    // No hard constraints — ADE's scoring weights handle strategy-based routing.
-    // Hard cost/latency caps were removed because Speed should mean "fastest
-    // capable model", not "cheapest model". The 40% speed weight in ADE already
-    // ensures fast models score highest without filtering out capable ones.
 
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
       prompt: chatReq.message,
@@ -870,10 +866,11 @@ async function handleChat(
               return;
             }
           }
+          console.error(`[chat] All providers failed. Primary: ${model.id} (${model.provider}), Backup: ${backup.id} (${backup.provider}). Errors logged in apiCallLogs.`);
           await sendSSE(writer, encoder, {
             type: "error",
             data: {
-              message: backupResult.error || "Something went wrong. Please try again.",
+              message: backupResult.error || "We're having trouble connecting to our AI providers. Please try again in a moment.",
               code: "ALL_PROVIDERS_FAILED",
             },
           });
@@ -912,10 +909,11 @@ async function handleChat(
             return;
           }
         }
+        console.error(`[chat] Primary model failed with no backup available. Model: ${model.id} (${model.provider}), Error: ${streamResult.error}`);
         await sendSSE(writer, encoder, {
           type: "error",
           data: {
-            message: "Something went wrong. Please try again.",
+            message: streamResult.error || "We're having trouble connecting to our AI providers. Please try again in a moment.",
             code: "PROVIDER_ERROR",
           },
         });
