@@ -11,11 +11,6 @@ interface ADEHumanContext {
   preferences?: { tone?: string };
 }
 
-interface ADEConstraints {
-  maxCostPer1kTokens?: number;
-  maxLatencyMs?: number;
-}
-
 interface ADERequest {
   prompt: string;
   modality: string;
@@ -23,10 +18,9 @@ interface ADERequest {
   availableProviders?: string[];
   context?: ADERequestContext;
   humanContext?: ADEHumanContext;
-  constraints?: ADEConstraints;
   tone?: string;
   conversationHasImages?: boolean;
-  qualityTier?: string;
+  strategy?: string;
 }
 
 interface ADECallResult {
@@ -77,10 +71,6 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
     body.humanContext = request.humanContext;
   }
 
-  if (request.constraints) {
-    body.constraints = request.constraints;
-  }
-
   if (request.tone) {
     body.tone = request.tone;
   }
@@ -89,8 +79,8 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
     body.conversationHasImages = true;
   }
 
-  if (request.qualityTier) {
-    body.qualityTier = request.qualityTier;
+  if (request.strategy) {
+    body.strategy = request.strategy;
   }
 
   let lastError: Error | null = null;

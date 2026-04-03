@@ -245,18 +245,18 @@ async function handleChat(
     // 6. Detect available providers and call ADE
     const availableProviders = getAvailableProviders();
 
-    // Map frontend autoStrategy to ADE qualityTier and build supporting params
-    const STRATEGY_TO_TIER: Record<string, string> = {
+    // Map frontend autoStrategy to ADE routing strategy
+    const STRATEGY_MAP: Record<string, string> = {
       default: "auto",
       costEfficient: "speed",
       taskBased: "balanced",
       humanFactors: "quality",
     };
 
-    const qualityTier = STRATEGY_TO_TIER[chatReq.autoStrategy ?? "default"] ?? "auto";
+    const strategy = STRATEGY_MAP[chatReq.autoStrategy ?? "default"] ?? "auto";
 
     // Build humanContext — always send when mood/tone/weather are available.
-    // Quality tier benefits most from human context, but all tiers can use it.
+    // All strategies benefit from human context when present.
     let humanContext: { emotionalState?: { mood?: string }; environmentalContext?: { weather?: string }; preferences?: { tone?: string } } | undefined;
 
     if (chatReq.mood || chatReq.weather || chatReq.tone) {
@@ -272,12 +272,10 @@ async function handleChat(
       }
     }
 
-    // Build constraints — Speed tier applies hard cost and latency caps
-    let constraints: { maxCostPer1kTokens?: number; maxLatencyMs?: number } | undefined;
-
-    if (qualityTier === "speed") {
-      constraints = { maxCostPer1kTokens: 0.005, maxLatencyMs: 3000 };
-    }
+    // No hard constraints — ADE's scoring weights handle strategy-based routing.
+    // Hard cost/latency caps were removed because Speed should mean "fastest
+    // capable model", not "cheapest model". The 40% speed weight in ADE already
+    // ensures fast models score highest without filtering out capable ones.
 
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
       prompt: chatReq.message,
@@ -289,10 +287,9 @@ async function handleChat(
         previousModelUsed,
       },
       humanContext,
-      constraints,
       tone: chatReq.tone,
       conversationHasImages: chatReq.conversationHasImages,
-      qualityTier,
+      strategy,
     });
 
     // 7. Check for fallback (unsupported task)
