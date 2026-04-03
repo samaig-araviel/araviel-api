@@ -46,7 +46,7 @@ export class AnthropicProvider implements AIProvider {
       } as unknown as Anthropic.Tool);
     }
 
-    const maxTokens = useThinking ? 32768 : 16384;
+    const maxTokens = useThinking ? 16384 : 8192;
 
     const params: Anthropic.MessageCreateParamsStreaming = {
       model: config.modelId,
