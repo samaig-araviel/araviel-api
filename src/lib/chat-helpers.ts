@@ -13,6 +13,7 @@ import type {
 } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { getChartInstructions } from "@/lib/prompts/chart-instructions";
+import { getArtifactInstructions } from "@/lib/prompts/artifact-instructions";
 import { getMessages as getImportedMessages } from "@/lib/imported-conversations";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -530,6 +531,8 @@ export function buildSystemPrompt(
 
   prompt += `\n\n${getRichBlockInstructions()}`;
 
+  prompt += `\n\n${getArtifactInstructions()}`;
+
   if (options?.includeFileInstructions) {
     prompt += `\n\n${getFileBlockInstructions()}`;
   }
@@ -623,7 +626,7 @@ In addition to standard markdown, you can emit special fenced code blocks that r
 ### Timeline Block
 Use \`\`\`timeline for chronological events, historical progressions, project milestones, or any sequence of dated/ordered events.
 
-Format: JSON array of objects with "date" (or "label") and "title" fields. Optional "description" field for details.
+**Simple format** (for basic 3–5 event timelines): JSON array of objects.
 
 Example:
 \`\`\`timeline
@@ -635,12 +638,43 @@ Example:
 ]
 \`\`\`
 
+**Era-grouped format** (for richer timelines with 6+ events spanning multiple periods): JSON object with "eras" array. Each era has a name, color, and events. This renders with color-coded cards, era labels, and an alternating left/right layout on desktop.
+
+Example:
+\`\`\`timeline
+{
+  "title": "History of Computing",
+  "layout": "alternating",
+  "eras": [
+    {
+      "name": "Mechanical Era",
+      "color": "#8B5CF6",
+      "events": [
+        {"date": "1837", "title": "Analytical Engine", "description": "Babbage designs the first general-purpose computer concept"},
+        {"date": "1890", "title": "Tabulating Machine", "description": "Hollerith's machine processes the US Census"}
+      ]
+    },
+    {
+      "name": "Electronic Era",
+      "color": "#0EA5E9",
+      "events": [
+        {"date": "1945", "title": "ENIAC", "description": "First general-purpose electronic computer"},
+        {"date": "1947", "title": "Transistor Invented", "description": "Bell Labs revolutionizes electronics"}
+      ]
+    }
+  ]
+}
+\`\`\`
+
 Rules:
-- Use when showing 3–12 chronological or sequential events.
+- Use when showing 3–15 chronological or sequential events.
 - "date" or "label" is required as the timeline marker (short, under 20 characters).
 - "title" is the event heading (under 60 characters).
 - "description" is optional additional context (under 150 characters).
 - Order items chronologically.
+- Use the eras format when events span multiple distinct periods or categories, when color grouping would improve comprehension, or when there are 6+ events that benefit from visual organization.
+- Choose distinct, visually appealing hex colors for each era. Good defaults: #8B5CF6 (purple), #D97706 (amber), #0EA5E9 (sky blue), #10B981 (emerald), #F43F5E (rose), #06B6D4 (cyan).
+- Set "layout": "alternating" for a visually rich alternating left/right layout on desktop.
 
 ### Comparison Block
 Use \`\`\`comparison for side-by-side feature comparisons, pros/cons, tool evaluations, or option analysis.
