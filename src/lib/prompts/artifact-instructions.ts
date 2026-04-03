@@ -41,10 +41,12 @@ For complex visual content that cannot be expressed well with standard blocks (p
 - Use a clean, modern design aesthetic with rounded corners, subtle shadows, and good whitespace.
 
 ### Do NOT use artifacts for:
-- Content that can be expressed as a markdown table
+- Simple data tables with rows and columns (use markdown tables instead)
 - Simple lists or comparisons (use native blocks)
 - Data visualizations with numeric data (use \`\`\`chart)
 - Flowcharts or sequence diagrams (use \`\`\`mermaid)
+
+IMPORTANT: Complex reference visuals like periodic tables, org charts, seating charts, and color-coded grids MUST use \`\`\`artifact — do NOT attempt these as markdown tables. They require CSS Grid layouts and color coding that markdown cannot express.
 
 ### Tips for great artifacts:
 - Use CSS Grid for table-like layouts (periodic table, calendars, org charts).
