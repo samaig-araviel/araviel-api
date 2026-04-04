@@ -25,19 +25,8 @@ interface PackInfo {
   packType: "starter" | "creator" | "studio";
 }
 
-// Sandbox defaults — env vars override these in production
-const SANDBOX_PRICES: Record<string, string> = {
-  STRIPE_PRICE_LITE_MONTHLY: "price_1TEzOPDgaoOWbIEAfsQzAeWf",
-  STRIPE_PRICE_LITE_ANNUAL: "price_1TEzTRDgaoOWbIEAfIWS9nrC",
-  STRIPE_PRICE_PRO_MONTHLY: "price_1TEzRjDgaoOWbIEAxD2w2t0z",
-  STRIPE_PRICE_PRO_ANNUAL: "price_1TEzUfDgaoOWbIEAOoeLS3HW",
-  STRIPE_PRICE_IMAGE_STARTER: "price_1TFXpXDgaoOWbIEAXhtRqZcN",
-  STRIPE_PRICE_IMAGE_CREATOR: "price_1TFXtWDgaoOWbIEAtUwv2Rvt",
-  STRIPE_PRICE_IMAGE_STUDIO: "price_1TFYCBDgaoOWbIEA3W9uOIyT",
-};
-
 function getPrice(envKey: string): string | undefined {
-  return process.env[envKey] || SANDBOX_PRICES[envKey];
+  return process.env[envKey];
 }
 
 function buildPriceMap(): Record<string, TierInfo> {
