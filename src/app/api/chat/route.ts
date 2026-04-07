@@ -35,7 +35,8 @@ import {
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
-import { canGenerate, chargeCredits } from "@/lib/credits";
+import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
+import type { CreditBalance } from "@/lib/credits";
 import { getUserSubscription, checkAndConsumeTextCredit } from "@/lib/subscription";
 import type { TextCreditState } from "@/lib/subscription";
 import { authenticateRequest, AuthError } from "@/lib/auth";
@@ -1489,8 +1490,10 @@ async function finalize(
 
   await updateConversationTimestamp(conversationId);
 
-  // Charge credits for image generation
+  // Charge credits for image generation, then fetch the authoritative post-charge balance.
+  // The balance is embedded in the done event so the client never needs a separate round-trip.
   let creditChargeResult: { creditsCharged?: number; remainingBalance?: number } = {};
+  let freshImageBalance: CreditBalance | null = null;
   if (creditInfo?.wasImageGeneration && creditInfo?.userId && pendingImages && pendingImages.length > 0) {
     try {
       const charge = await chargeCredits(creditInfo.userId, creditInfo.imageQuality ?? "standard", {
@@ -1506,6 +1509,13 @@ async function finalize(
       };
     } catch (err) {
       console.error("[chat] Credit charge failed:", err instanceof Error ? err.message : err);
+    }
+    // Always fetch the fresh balance regardless of charge success/failure.
+    // This gives the client an authoritative snapshot to display immediately.
+    try {
+      freshImageBalance = await getBalance(creditInfo.userId);
+    } catch (err) {
+      console.error("[chat] Failed to fetch post-charge balance:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -1542,6 +1552,10 @@ async function finalize(
       },
       latencyMs: result.latencyMs,
       adeLatencyMs,
+      // Include the full post-charge balance so the client can update both Redux slices
+      // directly from this event — no additional round-trip to /api/credits needed.
+      ...(freshImageBalance && { imageBalance: freshImageBalance }),
+      // Legacy field kept for any client versions that still read data.credits
       ...(creditChargeResult.creditsCharged !== undefined && {
         credits: {
           charged: creditChargeResult.creditsCharged,
