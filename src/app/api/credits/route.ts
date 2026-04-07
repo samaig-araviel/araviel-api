@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getBalance,
   canGenerate,
-  addPack,
-  updateTier,
   PACK_DEFINITIONS,
   IMAGE_QUALITY_COSTS,
   TIER_MONTHLY_CREDITS,
@@ -58,7 +56,11 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/credits
- * Actions: "check", "buy-pack", "update-tier"
+ * Actions: "check"
+ *
+ * Note: credit provisioning (buy-pack, update-tier) is handled exclusively
+ * by the Stripe webhook handler to ensure payment is verified before credits
+ * are granted. Direct self-service mutations have been removed.
  */
 export async function POST(request: NextRequest) {
   let user: AuthenticatedUser;
@@ -87,32 +89,6 @@ export async function POST(request: NextRequest) {
         const quality = body.quality ?? "standard";
         const result = await canGenerate(user.id, quality);
         return NextResponse.json(result, { headers: corsHeaders() });
-      }
-
-      case "buy-pack": {
-        const packType = body.packType;
-        if (!packType || !PACK_DEFINITIONS[packType]) {
-          return NextResponse.json(
-            { error: `Invalid pack type. Choose: ${Object.keys(PACK_DEFINITIONS).join(", ")}` },
-            { status: 400, headers: corsHeaders() }
-          );
-        }
-        const result = await addPack(user.id, packType);
-        const balance = await getBalance(user.id);
-        return NextResponse.json({ ...result, balance }, { headers: corsHeaders() });
-      }
-
-      case "update-tier": {
-        const tier = body.tier;
-        if (!tier || !TIER_MONTHLY_CREDITS[tier]) {
-          return NextResponse.json(
-            { error: `Invalid tier. Choose: ${Object.keys(TIER_MONTHLY_CREDITS).join(", ")}` },
-            { status: 400, headers: corsHeaders() }
-          );
-        }
-        await updateTier(user.id, tier);
-        const balance = await getBalance(user.id);
-        return NextResponse.json({ tier, balance }, { headers: corsHeaders() });
       }
 
       default:
