@@ -174,7 +174,12 @@ export async function canGenerate(
 
 /**
  * Charge credits for an image generation.
- * Deducts from monthly first, then oldest non-expired pack (FIFO).
+ *
+ * Delegates to the `consume_image_credit` Postgres function, which runs the
+ * full decision (monthly → pack FIFO → split) under row-level locks in a
+ * single transaction. This makes concurrent charges for the same user
+ * provably race-free and mirrors how text credits are consumed via
+ * `consume_text_credit` (see subscription.ts:checkAndConsumeTextCredit).
  */
 export async function chargeCredits(
   userId: string,
@@ -188,156 +193,33 @@ export async function chargeCredits(
   } = {}
 ): Promise<ChargeResult> {
   const cost = IMAGE_QUALITY_COSTS[quality] ?? IMAGE_QUALITY_COSTS.standard;
-  const account = await getOrCreateAccount(userId);
   const sb = getSupabase();
 
-  const monthlyRemaining = account.monthly_image_credits - account.monthly_image_credits_used;
-
-  if (monthlyRemaining >= cost) {
-    // Charge from monthly
-    await sb
-      .from("credit_accounts")
-      .update({
-        monthly_image_credits_used: account.monthly_image_credits_used + cost,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", account.id);
-
-    // Log usage
-    await sb.from("credit_usage_log").insert({
-      user_id: userId,
-      feature: "image",
-      quality,
-      credits_charged: cost,
-      source: "monthly",
-      model_used: metadata.modelUsed ?? null,
-      provider: metadata.provider ?? null,
-      conversation_id: metadata.conversationId ?? null,
-      message_id: metadata.messageId ?? null,
-      prompt_snippet: metadata.prompt?.slice(0, 100) ?? null,
-    });
-
-    const updatedBalance = await getBalance(userId);
-    return {
-      charged: true,
-      creditsCharged: cost,
-      source: "monthly",
-      remainingBalance: updatedBalance.combined,
-    };
-  }
-
-  // Not enough monthly — charge from oldest pack
-  const { data: packs } = await sb
-    .from("credit_packs")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("feature", "image")
-    .gt("expires_at", new Date().toISOString())
-    .order("purchased_at", { ascending: true });
-
-  const activePack = (packs ?? []).find(
-    (p: { credits_total: number; credits_used: number }) => p.credits_total - p.credits_used >= cost
-  );
-
-  if (!activePack) {
-    // Try splitting: use remaining monthly + pack
-    if (monthlyRemaining > 0) {
-      const fromPack = cost - monthlyRemaining;
-      const packForSplit = (packs ?? []).find(
-        (p: { credits_total: number; credits_used: number }) =>
-          p.credits_total - p.credits_used >= fromPack
-      );
-
-      if (packForSplit) {
-        // Charge monthly remainder
-        await sb
-          .from("credit_accounts")
-          .update({
-            monthly_image_credits_used: account.monthly_image_credits,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", account.id);
-
-        // Charge from pack
-        await sb
-          .from("credit_packs")
-          .update({ credits_used: packForSplit.credits_used + fromPack })
-          .eq("id", packForSplit.id);
-
-        // Log both
-        await sb.from("credit_usage_log").insert({
-          user_id: userId,
-          feature: "image",
-          quality,
-          credits_charged: monthlyRemaining,
-          source: "monthly",
-          model_used: metadata.modelUsed ?? null,
-          provider: metadata.provider ?? null,
-          conversation_id: metadata.conversationId ?? null,
-          message_id: metadata.messageId ?? null,
-          prompt_snippet: metadata.prompt?.slice(0, 100) ?? null,
-        });
-        await sb.from("credit_usage_log").insert({
-          user_id: userId,
-          feature: "image",
-          quality,
-          credits_charged: fromPack,
-          source: "pack",
-          source_id: packForSplit.id,
-          model_used: metadata.modelUsed ?? null,
-          provider: metadata.provider ?? null,
-          conversation_id: metadata.conversationId ?? null,
-          message_id: metadata.messageId ?? null,
-          prompt_snippet: metadata.prompt?.slice(0, 100) ?? null,
-        });
-
-        const updatedBalance = await getBalance(userId);
-        return {
-          charged: true,
-          creditsCharged: cost,
-          source: "pack",
-          sourceId: packForSplit.id,
-          remainingBalance: updatedBalance.combined,
-        };
-      }
-    }
-
-    return {
-      charged: false,
-      creditsCharged: 0,
-      source: "monthly",
-      remainingBalance: monthlyRemaining,
-    };
-  }
-
-  // Charge from pack
-  await sb
-    .from("credit_packs")
-    .update({ credits_used: activePack.credits_used + cost })
-    .eq("id", activePack.id);
-
-  // Log usage
-  await sb.from("credit_usage_log").insert({
-    user_id: userId,
-    feature: "image",
-    quality,
-    credits_charged: cost,
-    source: "pack",
-    source_id: activePack.id,
-    model_used: metadata.modelUsed ?? null,
-    provider: metadata.provider ?? null,
-    conversation_id: metadata.conversationId ?? null,
-    message_id: metadata.messageId ?? null,
-    prompt_snippet: metadata.prompt?.slice(0, 100) ?? null,
+  const { data, error } = await sb.rpc("consume_image_credit", {
+    p_user_id: userId,
+    p_cost: cost,
+    p_quality: quality,
+    p_model: metadata.modelUsed ?? null,
+    p_provider: metadata.provider ?? null,
+    p_conversation_id: metadata.conversationId ?? null,
+    p_message_id: metadata.messageId ?? null,
+    p_prompt_snippet: metadata.prompt?.slice(0, 100) ?? null,
   });
 
-  const updatedBalance = await getBalance(userId);
+  if (error) {
+    console.error("[credits] consume_image_credit RPC failed:", error.message);
+    throw new Error(`Failed to charge image credits: ${error.message}`);
+  }
+
+  const remainingMonthly = Number(data.remaining_monthly ?? 0);
+  const remainingPacks = Number(data.remaining_packs ?? 0);
+
   return {
-    charged: true,
-    creditsCharged: cost,
-    source: "pack",
-    sourceId: activePack.id,
-    remainingBalance: updatedBalance.combined,
+    charged: Boolean(data.charged),
+    creditsCharged: Number(data.credits_charged ?? 0),
+    source: data.source as "monthly" | "pack",
+    sourceId: data.source_id ?? undefined,
+    remainingBalance: remainingMonthly + remainingPacks,
   };
 }
 
