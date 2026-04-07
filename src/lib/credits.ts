@@ -325,6 +325,27 @@ export async function addPack(
 }
 
 /**
+ * Reset monthly image credits for a user, anchored to the Stripe billing period.
+ * Called by the Stripe webhook on checkout and on each renewal so the cycle
+ * is always Stripe-driven — not based on a rolling 30-day calendar from account creation.
+ */
+export async function resetMonthlyImageCredits(
+  userId: string,
+  periodStart: string
+): Promise<void> {
+  const sb = getSupabase();
+  const account = await getOrCreateAccount(userId);
+  await sb
+    .from("credit_accounts")
+    .update({
+      monthly_image_credits_used: 0,
+      billing_cycle_start: periodStart,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", account.id);
+}
+
+/**
  * Update a user's tier and adjust monthly credits accordingly.
  */
 export async function updateTier(userId: string, newTier: string): Promise<void> {

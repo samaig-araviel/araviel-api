@@ -36,7 +36,7 @@ import {
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
-import type { CreditBalance } from "@/lib/credits";
+import type { CreditBalance, ChargeResult } from "@/lib/credits";
 import { getUserSubscription, checkAndConsumeTextCredit } from "@/lib/subscription";
 import type { TextCreditState } from "@/lib/subscription";
 import { authenticateRequest, AuthError } from "@/lib/auth";
@@ -400,7 +400,13 @@ async function handleChat(
 
     const apiCallLogs: ApiCallLogEntry[] = [];
     const pendingImages: PendingImageMeta[] = [];
-    const creditInfo = {
+    const creditInfo: {
+      userId: string;
+      imageQuality: string;
+      wasImageGeneration: boolean;
+      textCredits?: TextCreditState;
+      preChargedResult?: ChargeResult;
+    } = {
       userId: user.id,
       imageQuality: imageQuality,
       wasImageGeneration: enableImageGeneration,
@@ -438,6 +444,31 @@ async function handleChat(
           });
         } catch (uploadErr) {
           console.error("[chat] Image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+        }
+
+        // Charge credits after successful upload, before confirming the image to the client.
+        // If the charge fails we abort — the user must not receive a free image.
+        if (pendingImages.length > 0 && creditInfo.userId) {
+          try {
+            const chargeResult = await chargeCredits(creditInfo.userId, imageQuality, {
+              modelUsed: model.id,
+              provider: model.provider,
+              conversationId,
+              messageId,
+              prompt: chatReq.message,
+            });
+            if (!chargeResult.charged) {
+              await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
+              await writer.close();
+              return;
+            }
+            creditInfo.preChargedResult = chargeResult;
+          } catch (chargeErr) {
+            console.error("[chat] Image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+            await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
+            await writer.close();
+            return;
+          }
         }
 
         await sendSSE(writer, encoder, {
@@ -538,6 +569,30 @@ async function handleChat(
               });
             } catch (uploadErr) {
               console.error("[chat] Backup image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+            }
+
+            // Charge credits after successful upload, before confirming image to client.
+            if (pendingImages.length > 0 && creditInfo.userId) {
+              try {
+                const chargeResult = await chargeCredits(creditInfo.userId, imageQuality, {
+                  modelUsed: backup.id,
+                  provider: backup.provider,
+                  conversationId,
+                  messageId,
+                  prompt: chatReq.message,
+                });
+                if (!chargeResult.charged) {
+                  await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
+                  await writer.close();
+                  return;
+                }
+                creditInfo.preChargedResult = chargeResult;
+              } catch (chargeErr) {
+                console.error("[chat] Backup image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+                await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
+                await writer.close();
+                return;
+              }
             }
 
             await sendSSE(writer, encoder, {
@@ -661,6 +716,30 @@ async function handleChat(
               console.error("[chat] Fallback image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
             }
 
+            // Charge credits after successful upload, before confirming image to client.
+            if (pendingImages.length > 0 && creditInfo.userId) {
+              try {
+                const chargeResult = await chargeCredits(creditInfo.userId, imageQuality, {
+                  modelUsed: imageBackup.id,
+                  provider: imageBackup.provider,
+                  conversationId,
+                  messageId,
+                  prompt: chatReq.message,
+                });
+                if (!chargeResult.charged) {
+                  await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
+                  await writer.close();
+                  return;
+                }
+                creditInfo.preChargedResult = chargeResult;
+              } catch (chargeErr) {
+                console.error("[chat] Fallback image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+                await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
+                await writer.close();
+                return;
+              }
+            }
+
             await sendSSE(writer, encoder, {
               type: "image_generation",
               data: {
@@ -757,7 +836,7 @@ async function handleChat(
 
       // No image-capable backup in ADE alternates — auto-fallback to dedicated image model
       const dedicatedFallback = await tryDedicatedImageFallback(
-        chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages
+        chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
       );
       if (dedicatedFallback) {
         await finalize(
@@ -855,7 +934,7 @@ async function handleChat(
           // If image generation was requested, try a dedicated image model as last resort
           if (enableImageGeneration) {
             const dedicatedFallback = await tryDedicatedImageFallback(
-              chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages
+              chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
             );
             if (dedicatedFallback) {
               await finalize(
@@ -898,7 +977,7 @@ async function handleChat(
         // No backup model — if image gen was requested, try a dedicated image model
         if (enableImageGeneration) {
           const dedicatedFallback = await tryDedicatedImageFallback(
-            chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages
+            chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
           );
           if (dedicatedFallback) {
             await finalize(
@@ -1021,7 +1100,8 @@ async function tryDedicatedImageFallback(
   encoder: TextEncoder,
   conversationId?: string,
   messageId?: string,
-  pendingImages?: PendingImageMeta[]
+  pendingImages?: PendingImageMeta[],
+  creditInfo?: { userId?: string; preChargedResult?: ChargeResult }
 ): Promise<StreamResult | null> {
   for (const imgModel of FALLBACK_IMAGE_MODELS) {
     // Skip models whose API key is not configured
@@ -1073,6 +1153,30 @@ async function tryDedicatedImageFallback(
           }
         } catch (uploadErr) {
           console.error("[chat] Dedicated fallback image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+        }
+      }
+
+      // Charge credits after successful upload, before confirming image to client.
+      if (pendingImages && pendingImages.length > 0 && creditInfo?.userId) {
+        try {
+          const chargeResult = await chargeCredits(creditInfo.userId, "standard", {
+            modelUsed: imgModel.id,
+            provider: imgModel.provider,
+            conversationId,
+            messageId,
+            prompt,
+          });
+          if (!chargeResult.charged) {
+            await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
+            await writer.close();
+            return null;
+          }
+          if (creditInfo) creditInfo.preChargedResult = chargeResult;
+        } catch (chargeErr) {
+          console.error("[chat] Dedicated fallback image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+          await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
+          await writer.close();
+          return null;
         }
       }
 
@@ -1419,7 +1523,7 @@ async function finalize(
   encoder: TextEncoder,
   subConversationId?: string,
   pendingImages?: PendingImageMeta[],
-  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; textCredits?: TextCreditState }
+  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; textCredits?: TextCreditState; preChargedResult?: ChargeResult }
 ): Promise<void> {
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
@@ -1491,27 +1595,38 @@ async function finalize(
   await updateConversationTimestamp(conversationId);
 
   // Charge credits for image generation, then fetch the authoritative post-charge balance.
+  // For dedicated image models (Path A), the charge was pre-applied before the image SSE was sent
+  // so creditInfo.preChargedResult is already populated — skip the charge to avoid double-billing.
+  // For chat models with native image gen (Path B), the charge happens here.
   // The balance is embedded in the done event so the client never needs a separate round-trip.
   let creditChargeResult: { creditsCharged?: number; remainingBalance?: number } = {};
   let freshImageBalance: CreditBalance | null = null;
   if (creditInfo?.wasImageGeneration && creditInfo?.userId && pendingImages && pendingImages.length > 0) {
-    try {
-      const charge = await chargeCredits(creditInfo.userId, creditInfo.imageQuality ?? "standard", {
-        modelUsed: model.id,
-        provider: model.provider,
-        conversationId,
-        messageId,
-        prompt: pendingImages[0]?.prompt,
-      });
+    if (creditInfo.preChargedResult) {
+      // Already charged atomically before the image SSE — use the stored result.
       creditChargeResult = {
-        creditsCharged: charge.creditsCharged,
-        remainingBalance: charge.remainingBalance,
+        creditsCharged: creditInfo.preChargedResult.creditsCharged,
+        remainingBalance: creditInfo.preChargedResult.remainingBalance,
       };
-    } catch (err) {
-      console.error("[chat] Credit charge failed:", err instanceof Error ? err.message : err);
+    } else {
+      // Path B: chat model with native image gen — charge now.
+      try {
+        const charge = await chargeCredits(creditInfo.userId, creditInfo.imageQuality ?? "standard", {
+          modelUsed: model.id,
+          provider: model.provider,
+          conversationId,
+          messageId,
+          prompt: pendingImages[0]?.prompt,
+        });
+        creditChargeResult = {
+          creditsCharged: charge.creditsCharged,
+          remainingBalance: charge.remainingBalance,
+        };
+      } catch (err) {
+        console.error("[chat] Credit charge failed:", err instanceof Error ? err.message : err);
+      }
     }
-    // Always fetch the fresh balance regardless of charge success/failure.
-    // This gives the client an authoritative snapshot to display immediately.
+    // Always fetch the fresh balance for an authoritative snapshot to embed in the done event.
     try {
       freshImageBalance = await getBalance(creditInfo.userId);
     } catch (err) {

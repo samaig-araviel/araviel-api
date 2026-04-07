@@ -6,7 +6,7 @@ import {
   resetMonthlyTextCredits,
   resolveFirstMonth,
 } from "@/lib/subscription";
-import { updateTier, addPack, PACK_DEFINITIONS } from "@/lib/credits";
+import { updateTier, addPack, resetMonthlyImageCredits, PACK_DEFINITIONS } from "@/lib/credits";
 import { getSupabase } from "@/lib/supabase";
 import { WebhookBadRequestError, WebhookRetryableError } from "@/lib/webhook-errors";
 import type Stripe from "stripe";
@@ -220,12 +220,20 @@ async function handleCheckoutCompleted(
     );
   }
 
-  // Sync image credit tier
+  // Sync image credit tier and reset the monthly cycle to match Stripe's period
   try {
     await updateTier(userId, tierInfo.tier);
   } catch (err) {
     throw new WebhookRetryableError(
       `Failed to sync image credit tier: ${err instanceof Error ? err.message : err}`
+    );
+  }
+
+  try {
+    await resetMonthlyImageCredits(userId, new Date(periodStart * 1000).toISOString());
+  } catch (err) {
+    throw new WebhookRetryableError(
+      `Failed to sync image credit cycle: ${err instanceof Error ? err.message : err}`
     );
   }
 
@@ -352,13 +360,21 @@ async function handleSubscriptionUpdated(
     );
   }
 
-  // On renewal, reset monthly text credits
+  // On renewal, reset both text and image monthly credits, anchored to the new Stripe period
   if (isRenewal) {
     try {
       await resetMonthlyTextCredits(userId);
     } catch (err) {
       throw new WebhookRetryableError(
         `Failed to reset monthly text credits: ${err instanceof Error ? err.message : err}`
+      );
+    }
+
+    try {
+      await resetMonthlyImageCredits(userId, newPeriodStart);
+    } catch (err) {
+      throw new WebhookRetryableError(
+        `Failed to reset monthly image credits: ${err instanceof Error ? err.message : err}`
       );
     }
   }
