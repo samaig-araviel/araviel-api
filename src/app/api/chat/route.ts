@@ -1101,7 +1101,7 @@ async function tryDedicatedImageFallback(
   conversationId?: string,
   messageId?: string,
   pendingImages?: PendingImageMeta[],
-  creditInfo?: { userId?: string; preChargedResult?: ChargeResult }
+  creditInfo?: { userId?: string; imageQuality?: string; preChargedResult?: ChargeResult }
 ): Promise<StreamResult | null> {
   for (const imgModel of FALLBACK_IMAGE_MODELS) {
     // Skip models whose API key is not configured
@@ -1123,7 +1123,7 @@ async function tryDedicatedImageFallback(
         },
       });
 
-      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt, "standard");
+      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt, (creditInfo?.imageQuality ?? "standard") as import("@/lib/providers/image").ImageQuality);
       const latencyMs = Date.now() - start;
 
       apiCallLogs.push({
@@ -1159,7 +1159,7 @@ async function tryDedicatedImageFallback(
       // Charge credits after successful upload, before confirming image to client.
       if (pendingImages && pendingImages.length > 0 && creditInfo?.userId) {
         try {
-          const chargeResult = await chargeCredits(creditInfo.userId, "standard", {
+          const chargeResult = await chargeCredits(creditInfo.userId, creditInfo.imageQuality ?? "standard", {
             modelUsed: imgModel.id,
             provider: imgModel.provider,
             conversationId,
@@ -1189,7 +1189,7 @@ async function tryDedicatedImageFallback(
           provider: imgModel.provider,
           size: imageResult.size ?? "1024x1024",
           style: imageResult.style ?? null,
-          quality: "standard",
+          quality: creditInfo?.imageQuality ?? "standard",
           id: dlImageId,
         },
       });
