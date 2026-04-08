@@ -15,10 +15,17 @@
 -- Required indexes for performance are already provided by 001_image_credits.sql:
 --   - credit_accounts: UNIQUE(user_id), idx_credit_accounts_user
 --   - credit_packs:    idx_credit_packs_user (user_id, feature, expires_at)
+--
+-- NOTE: p_user_id must be UUID to match credit_accounts.user_id, credit_packs.user_id,
+-- and credit_usage_log.user_id column types. The TypeScript caller passes a UUID
+-- string; Supabase/PostgREST coerces it to the correct type automatically.
 -- ============================================
 
+-- Drop any previous version with the wrong TEXT parameter type
+DROP FUNCTION IF EXISTS consume_image_credit(TEXT, INT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION consume_image_credit(
-  p_user_id         TEXT,
+  p_user_id         UUID,
   p_cost            INT,
   p_quality         TEXT,
   p_model           TEXT,
@@ -33,16 +40,15 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_account         credit_accounts%ROWTYPE;
+  v_account           credit_accounts%ROWTYPE;
   v_monthly_remaining INT;
-  v_pack            credit_packs%ROWTYPE;
-  v_split_pack      credit_packs%ROWTYPE;
-  v_from_pack       INT;
+  v_pack              credit_packs%ROWTYPE;
+  v_split_pack        credit_packs%ROWTYPE;
+  v_from_pack         INT;
   v_remaining_monthly INT;
   v_remaining_packs   INT;
 BEGIN
-  -- Bound the time any single call can hold a row lock.
-  SET LOCAL statement_timeout = '3s';
+  SET LOCAL statement_timeout = '5s';
 
   IF p_cost IS NULL OR p_cost <= 0 THEN
     RAISE EXCEPTION 'consume_image_credit: p_cost must be positive, got %', p_cost;
@@ -75,7 +81,7 @@ BEGIN
 
   v_monthly_remaining := v_account.monthly_image_credits - v_account.monthly_image_credits_used;
 
-  -- ── Path 1: charge entirely from monthly ─────────────────────────────────
+  -- ── Path 1: charge entirely from monthly ──────────────────────────────────
   IF v_monthly_remaining >= p_cost THEN
     UPDATE credit_accounts
     SET monthly_image_credits_used = monthly_image_credits_used + p_cost,
@@ -109,7 +115,7 @@ BEGIN
     );
   END IF;
 
-  -- ── Path 2: charge entirely from a single non-expired pack (FIFO) ────────
+  -- ── Path 2: charge entirely from a single non-expired pack (FIFO) ─────────
   SELECT * INTO v_pack
   FROM credit_packs
   WHERE user_id    = p_user_id
@@ -152,7 +158,7 @@ BEGIN
     );
   END IF;
 
-  -- ── Path 3: split between remaining monthly and a single pack ────────────
+  -- ── Path 3: split between remaining monthly and a single pack ─────────────
   IF v_monthly_remaining > 0 THEN
     v_from_pack := p_cost - v_monthly_remaining;
 
@@ -213,7 +219,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- ── Path 4: insufficient credits ─────────────────────────────────────────
+  -- ── Path 4: insufficient credits ──────────────────────────────────────────
   SELECT COALESCE(SUM(credits_total - credits_used), 0) INTO v_remaining_packs
   FROM credit_packs
   WHERE user_id = p_user_id
@@ -231,5 +237,5 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION consume_image_credit(TEXT, INT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION consume_image_credit(TEXT, INT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION consume_image_credit(UUID, INT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION consume_image_credit(UUID, INT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO service_role;
