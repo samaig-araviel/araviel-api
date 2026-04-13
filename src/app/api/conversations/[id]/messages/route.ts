@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
-import type { DBMessage, Citation, ModelInfo, FollowUpQuestion } from "@/lib/types";
+import type { DBMessage, Citation, ImageAttachment, ModelInfo, FollowUpQuestion } from "@/lib/types";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
 
 interface FormattedMessage {
@@ -27,6 +27,7 @@ interface FormattedMessage {
   adeLatencyMs?: number | null;
   followUps?: string[] | null;
   questions?: FollowUpQuestion[] | null;
+  attachments?: ImageAttachment[] | null;
 }
 
 function formatMessage(msg: DBMessage): FormattedMessage {
@@ -39,6 +40,9 @@ function formatMessage(msg: DBMessage): FormattedMessage {
   };
 
   if (msg.role !== "assistant") {
+    if (msg.attachments && Array.isArray(msg.attachments) && msg.attachments.length > 0) {
+      base.attachments = msg.attachments as ImageAttachment[];
+    }
     return base;
   }
 

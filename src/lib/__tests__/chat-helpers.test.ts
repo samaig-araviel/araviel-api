@@ -272,7 +272,6 @@ describe("resolveModel", () => {
 
 describe("isImageGenerationModel", () => {
   it("returns true for dedicated image models", () => {
-    expect(isImageGenerationModel("dall-e-3")).toBe(true);
     expect(isImageGenerationModel("gpt-image-1")).toBe(true);
     expect(isImageGenerationModel("gpt-image-1.5")).toBe(true);
     expect(isImageGenerationModel("gpt-image-1-mini")).toBe(true);
@@ -292,7 +291,7 @@ describe("isImageGenerationModel", () => {
 
 describe("canModelGenerateImages", () => {
   it("returns true for dedicated image models", () => {
-    expect(canModelGenerateImages("dall-e-3")).toBe(true);
+    expect(canModelGenerateImages("gpt-image-1")).toBe(true);
   });
 
   it("returns true for native image gen chat models", () => {

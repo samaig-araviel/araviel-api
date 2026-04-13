@@ -34,10 +34,24 @@ const GEMINI_IMAGE_GEN_MODELS = new Set([
 ]);
 
 function buildContents(messages: ConversationMessage[]): Content[] {
-  return messages.map((msg) => ({
-    role: msg.role === "assistant" ? "model" : "user",
-    parts: [{ text: msg.content }],
-  }));
+  return messages.map((msg) => {
+    if (msg.images && msg.images.length > 0 && msg.role !== "assistant") {
+      const parts: Part[] = [
+        ...msg.images.map((img) => ({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.dataUri.split(",")[1] ?? "",
+          },
+        })),
+        ...(msg.content ? [{ text: msg.content }] : []),
+      ];
+      return { role: "user" as const, parts };
+    }
+    return {
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    };
+  }) as Content[];
 }
 
 export class GeminiProvider implements AIProvider {

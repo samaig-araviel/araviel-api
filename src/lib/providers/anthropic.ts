@@ -18,10 +18,29 @@ const ADAPTIVE_THINKING_MODELS = new Set([
 function buildMessages(
   messages: ConversationMessage[]
 ): Anthropic.MessageParam[] {
-  return messages.map((msg) => ({
-    role: msg.role === "assistant" ? "assistant" : "user",
-    content: msg.content,
-  }));
+  return messages.map((msg) => {
+    if (msg.images && msg.images.length > 0 && msg.role !== "assistant") {
+      const content: Anthropic.ContentBlockParam[] = [
+        ...msg.images.map((img) => ({
+          type: "image" as const,
+          source: {
+            type: "base64" as const,
+            media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+            data: img.dataUri.split(",")[1] ?? "",
+          },
+        })),
+        ...(msg.content ? [{ type: "text" as const, text: msg.content }] : []),
+      ];
+      return {
+        role: "user" as const,
+        content,
+      };
+    }
+    return {
+      role: msg.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      content: msg.content,
+    };
+  });
 }
 
 export class AnthropicProvider implements AIProvider {

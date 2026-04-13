@@ -40,11 +40,26 @@ const DEEP_RESEARCH_MODELS = new Set([
 function buildInput(
   messages: ConversationMessage[]
 ): OpenAI.Responses.ResponseInputItem[] {
-  return messages.map((msg) => ({
-    role: msg.role === "assistant" ? "assistant" : "user",
-    content: msg.content,
-    type: "message" as const,
-  }));
+  return messages.map((msg) => {
+    if (msg.images && msg.images.length > 0 && msg.role !== "assistant") {
+      return {
+        role: "user" as const,
+        type: "message" as const,
+        content: [
+          ...(msg.content ? [{ type: "input_text" as const, text: msg.content }] : []),
+          ...msg.images.map((img) => ({
+            type: "input_image" as const,
+            image_url: img.dataUri,
+          })),
+        ],
+      };
+    }
+    return {
+      role: msg.role === "assistant" ? "assistant" : "user",
+      content: msg.content,
+      type: "message" as const,
+    };
+  }) as OpenAI.Responses.ResponseInputItem[];
 }
 
 export class OpenAIProvider implements AIProvider {

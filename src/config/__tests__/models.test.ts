@@ -46,9 +46,9 @@ describe("getModelPricing", () => {
     });
 
     it("returns correct pricing for image models", () => {
-      const pricing = getModelPricing("dall-e-3", "openai");
-      expect(pricing.inputPerMillion).toBe(40);
-      expect(pricing.outputPerMillion).toBe(80);
+      const pricing = getModelPricing("gpt-image-1", "openai");
+      expect(pricing.inputPerMillion).toBe(0);
+      expect(pricing.outputPerMillion).toBe(19);
     });
   });
 
