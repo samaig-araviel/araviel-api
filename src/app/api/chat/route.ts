@@ -5,7 +5,7 @@ import { getProvider, getAvailableProviders } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
 import type { AravielMeta } from "@/lib/stream/meta-parser";
-import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse } from "@/lib/types";
+import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse, ConversationMessage, ImageAttachment } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
 import {
@@ -819,7 +819,8 @@ async function handleChat(
             apiCallLogs,
             conversationId,
             messageId,
-            pendingImages
+            pendingImages,
+            chatReq.images
           );
 
           if (backupResult.success) {
@@ -905,7 +906,8 @@ async function handleChat(
       apiCallLogs,
       conversationId,
       messageId,
-      pendingImages
+      pendingImages,
+      chatReq.images
     );
 
     // 13. If primary failed, try backup
@@ -937,7 +939,8 @@ async function handleChat(
           apiCallLogs,
           conversationId,
           messageId,
-          pendingImages
+          pendingImages,
+          chatReq.images
         );
 
         if (!backupResult.success) {
@@ -1233,7 +1236,7 @@ async function tryDedicatedImageFallback(
 async function streamFromProvider(
   model: ModelInfo,
   systemPrompt: string,
-  history: Array<{ role: string; content: string }>,
+  history: ConversationMessage[],
   enableWebSearch: boolean,
   enableThinking: boolean,
   enableImageGeneration: boolean,
@@ -1243,7 +1246,8 @@ async function streamFromProvider(
   apiCallLogs: ApiCallLogEntry[],
   conversationId?: string,
   messageId?: string,
-  pendingImages?: PendingImageMeta[]
+  pendingImages?: PendingImageMeta[],
+  uploadedImages?: ImageAttachment[]
 ): Promise<StreamResult> {
   const start = Date.now();
   let content = "";
@@ -1265,27 +1269,23 @@ async function streamFromProvider(
     const provider = getProvider(model.provider as SupportedProvider);
 
     // Build messages, carrying images through for vision-capable models
-    const providerMessages = history.map((m) => {
-      const msg: import("@/lib/types").ConversationMessage = {
-        role: m.role as "user" | "assistant" | "system",
+    const providerMessages: ConversationMessage[] = history.map((m) => {
+      const msg: ConversationMessage = {
+        role: m.role,
         content: m.content,
       };
-      if (m.images && m.images.length > 0) {
-        if (supportsVision(model.id)) {
-          msg.images = m.images;
-        }
-        // For non-vision models, images are silently stripped —
-        // the user message text still goes through normally
+      if (m.images && m.images.length > 0 && supportsVision(model.id)) {
+        msg.images = m.images;
       }
       return msg;
     });
 
     // If images were attached to the current request but not yet in history
     // (e.g. freshly uploaded), attach them to the last user message
-    if (hasUploadedImages && supportsVision(model.id)) {
+    if (uploadedImages && uploadedImages.length > 0 && supportsVision(model.id)) {
       for (let i = providerMessages.length - 1; i >= 0; i--) {
         if (providerMessages[i]!.role === "user" && !providerMessages[i]!.images) {
-          providerMessages[i]!.images = chatReq.images;
+          providerMessages[i]!.images = uploadedImages;
           break;
         }
       }
