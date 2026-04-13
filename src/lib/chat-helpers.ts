@@ -8,6 +8,7 @@ import type {
   DBConversation,
   DBMessage,
   DBSubConversation,
+  ImageAttachment,
   ModelInfo,
   TokenUsage,
 } from "@/lib/types";
@@ -56,7 +57,49 @@ export function validateChatRequest(body: unknown): ChatRequest {
     autoStrategy: typeof req.autoStrategy === "string" ? req.autoStrategy : undefined,
     weather: typeof req.weather === "string" ? req.weather : undefined,
     conversationHasImages: typeof req.conversationHasImages === "boolean" ? req.conversationHasImages : undefined,
+    images: validateImages(req.images),
   };
+}
+
+const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB per image
+const MAX_IMAGES = 10;
+
+function validateImages(raw: unknown): ImageAttachment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  if (raw.length > MAX_IMAGES) {
+    throw new Error(`Too many images: maximum ${MAX_IMAGES} allowed`);
+  }
+
+  const images: ImageAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const { dataUri, mimeType, fileName } = item as Record<string, unknown>;
+
+    if (typeof dataUri !== "string" || !dataUri.startsWith("data:image/")) {
+      throw new Error("Each image must have a valid data URI starting with data:image/");
+    }
+    if (typeof mimeType !== "string" || !ACCEPTED_IMAGE_TYPES.has(mimeType)) {
+      throw new Error(`Unsupported image type: ${mimeType}. Accepted: jpeg, png, gif, webp`);
+    }
+
+    // Estimate decoded size from base64 length (base64 is ~4/3 of binary)
+    const commaIdx = dataUri.indexOf(",");
+    if (commaIdx === -1) throw new Error("Invalid data URI format");
+    const base64Length = dataUri.length - commaIdx - 1;
+    const estimatedBytes = Math.ceil(base64Length * 0.75);
+    if (estimatedBytes > MAX_IMAGE_BYTES) {
+      throw new Error(`Image exceeds 2 MB limit (${Math.round(estimatedBytes / 1024)}KB)`);
+    }
+
+    images.push({
+      dataUri: dataUri as string,
+      mimeType: mimeType as string,
+      fileName: typeof fileName === "string" ? fileName : undefined,
+    });
+  }
+
+  return images.length > 0 ? images : undefined;
 }
 
 export async function getOrCreateConversation(
@@ -117,19 +160,26 @@ export async function getOrCreateConversation(
 export async function saveUserMessage(
   conversationId: string,
   content: string,
-  subConversationId?: string
+  subConversationId?: string,
+  attachments?: ImageAttachment[]
 ): Promise<string> {
   const supabase = getSupabase();
   const id = randomUUID();
 
-  const { error } = await supabase.from("messages").insert({
+  const row: Record<string, unknown> = {
     id,
     conversation_id: conversationId,
     sub_conversation_id: subConversationId ?? null,
     role: "user",
     content,
     created_at: new Date().toISOString(),
-  });
+  };
+
+  if (attachments && attachments.length > 0) {
+    row.attachments = attachments;
+  }
+
+  const { error } = await supabase.from("messages").insert(row);
 
   if (error) {
     throw new Error(`Failed to save user message: ${error.message}`);
@@ -261,7 +311,7 @@ export async function fetchConversationHistory(
 
     const { data, error } = await supabase
       .from("messages")
-      .select("role, content")
+      .select("role, content, attachments")
       .eq("sub_conversation_id", subConversationId)
       .order("created_at", { ascending: true })
       .limit(20);
@@ -270,10 +320,13 @@ export async function fetchConversationHistory(
       throw new Error(`Failed to fetch sub-conversation history: ${error.message}`);
     }
 
-    const messages = (data ?? []).map((msg: Pick<DBMessage, "role" | "content">) => ({
+    const messages = (data ?? []).map((msg: Pick<DBMessage, "role" | "content" | "attachments">) => ({
       role: msg.role as ConversationMessage["role"],
       content: msg.content,
     }));
+
+    // Attach images from the last user message only (avoids resending old images to providers)
+    attachImagesFromLastUserMessage(messages, data ?? []);
 
     return [...contextMessages, ...messages];
   }
@@ -281,7 +334,7 @@ export async function fetchConversationHistory(
   // Main conversation: exclude sub-conversation messages
   const { data, error } = await supabase
     .from("messages")
-    .select("role, content")
+    .select("role, content, attachments")
     .eq("conversation_id", conversationId)
     .is("sub_conversation_id", null)
     .order("created_at", { ascending: true })
@@ -291,10 +344,35 @@ export async function fetchConversationHistory(
     throw new Error(`Failed to fetch conversation history: ${error.message}`);
   }
 
-  return (data ?? []).map((msg: Pick<DBMessage, "role" | "content">) => ({
+  const messages = (data ?? []).map((msg: Pick<DBMessage, "role" | "content" | "attachments">) => ({
     role: msg.role as ConversationMessage["role"],
     content: msg.content,
   }));
+
+  // Attach images from the last user message only
+  attachImagesFromLastUserMessage(messages, data ?? []);
+
+  return messages;
+}
+
+/**
+ * Find the last user message in the fetched DB rows that has attachments,
+ * and populate its `images` field on the corresponding ConversationMessage.
+ * Only the most recent user message with images is populated to avoid
+ * resending old images to the provider (saves tokens).
+ */
+function attachImagesFromLastUserMessage(
+  messages: ConversationMessage[],
+  dbRows: Array<Pick<DBMessage, "role" | "content" | "attachments">>
+): void {
+  for (let i = dbRows.length - 1; i >= 0; i--) {
+    const row = dbRows[i]!;
+    if (row.role !== "user" || !row.attachments) continue;
+    const attachments = row.attachments as ImageAttachment[];
+    if (!Array.isArray(attachments) || attachments.length === 0) continue;
+    messages[i]!.images = attachments;
+    break;
+  }
 }
 
 /**
@@ -406,7 +484,7 @@ export function resolveModel(
 
 function guessProviderFromModelId(modelId: string): string {
   if (modelId.startsWith("claude")) return "anthropic";
-  if (modelId.startsWith("gpt") || modelId.startsWith("o3") || modelId.startsWith("o4") || modelId.startsWith("dall-e") || modelId.startsWith("gpt-image")) return "openai";
+  if (modelId.startsWith("gpt") || modelId.startsWith("o3") || modelId.startsWith("o4") || modelId.startsWith("gpt-image")) return "openai";
   if (modelId.startsWith("gemini") || modelId.startsWith("imagen")) return "google";
   if (modelId.startsWith("sonar")) return "perplexity";
   if (modelId.startsWith("stable-diffusion")) return "stability";
@@ -415,7 +493,6 @@ function guessProviderFromModelId(modelId: string): string {
 
 /** Dedicated image generation models that use separate image APIs (not chat/streaming). */
 const DEDICATED_IMAGE_MODELS = new Set([
-  "dall-e-3",
   "gpt-image-1",
   "gpt-image-1.5",
   "gpt-image-1-mini",
@@ -461,6 +538,28 @@ export function canModelGenerateImages(modelId: string): boolean {
   return DEDICATED_IMAGE_MODELS.has(modelId) || NATIVE_IMAGE_GEN_MODELS.has(modelId);
 }
 
+/** Models that do NOT support vision (image input for analysis). */
+const NON_VISION_MODELS = new Set([
+  // Dedicated image generation models
+  "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini",
+  "imagen-4", "imagen-3",
+  "stable-diffusion-3.5",
+  // TTS / audio-only models
+  "gpt-4o-mini-tts",
+  "elevenlabs-tts-flash", "elevenlabs-tts-multilingual", "elevenlabs-music",
+  // Video-only models
+  "sora-2", "veo-3.1",
+]);
+
+/**
+ * Check whether a model supports vision (image input for analysis).
+ * All main text/chat models support vision; only dedicated image-gen,
+ * TTS, and video models do not.
+ */
+export function supportsVision(modelId: string): boolean {
+  return !NON_VISION_MODELS.has(modelId);
+}
+
 /**
  * Returns a list of image-capable models we support, grouped by type,
  * for use in user-facing fallback messages.
@@ -473,7 +572,6 @@ export function getImageCapableModels(): {
     dedicated: [
       { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "OpenAI" },
       { id: "gpt-image-1-mini", name: "GPT Image 1 Mini", provider: "OpenAI" },
-      { id: "dall-e-3", name: "DALL-E 3", provider: "OpenAI" },
       { id: "imagen-4", name: "Imagen 4", provider: "Google" },
       { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "Stability AI" },
     ],

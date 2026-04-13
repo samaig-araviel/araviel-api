@@ -8,6 +8,12 @@ export const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set<SupportedProvide
   "stability",
 ]);
 
+export interface ImageAttachment {
+  dataUri: string;
+  mimeType: string;
+  fileName?: string;
+}
+
 export interface ChatRequest {
   conversationId?: string;
   subConversationId?: string;
@@ -25,6 +31,7 @@ export interface ChatRequest {
   autoStrategy?: string;
   weather?: string;
   conversationHasImages?: boolean;
+  images?: ImageAttachment[];
 }
 
 export interface ModelInfo {
@@ -112,6 +119,7 @@ export interface ADEResponse {
 export interface ConversationMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  images?: ImageAttachment[];
 }
 
 export interface TokenUsage {

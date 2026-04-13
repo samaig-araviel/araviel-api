@@ -44,7 +44,7 @@ export async function uploadImageToStorage(opts: {
     mimeType = match[1];
     buffer = Buffer.from(match[2], "base64");
   } else if (opts.imageDataUrl.startsWith("http")) {
-    // External URL (e.g. DALL-E 3) — fetch and upload
+    // External URL — fetch and upload
     const res = await fetch(opts.imageDataUrl);
     if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
     const arrayBuf = await res.arrayBuffer();

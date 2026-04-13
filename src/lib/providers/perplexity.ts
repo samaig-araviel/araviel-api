@@ -12,10 +12,25 @@ function buildMessages(
   ];
 
   for (const msg of messages) {
-    result.push({
-      role: msg.role === "assistant" ? "assistant" : "user",
-      content: msg.content,
-    });
+    if (msg.images && msg.images.length > 0 && msg.role !== "assistant") {
+      // Perplexity uses { type: "image_url", image_url: "<string>" } (flat string, not nested)
+      const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: string }> = [];
+      if (msg.content) {
+        content.push({ type: "text", text: msg.content });
+      }
+      for (const img of msg.images) {
+        content.push({ type: "image_url", image_url: img.dataUri });
+      }
+      result.push({
+        role: "user",
+        content: content as unknown as OpenAI.ChatCompletionMessageParam["content"],
+      } as OpenAI.ChatCompletionMessageParam);
+    } else {
+      result.push({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        content: msg.content,
+      });
+    }
   }
 
   return result;

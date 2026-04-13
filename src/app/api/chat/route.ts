@@ -32,6 +32,7 @@ import {
   canModelGenerateImages,
   getImageCapableModels,
   getDeepResearchInstructions,
+  supportsVision,
 } from "@/lib/chat-helpers";
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
@@ -196,7 +197,7 @@ async function handleChat(
     }
 
     // 3. Save user message first (must complete before fetching history)
-    await saveUserMessage(conversationId, chatReq.message, subConversationId);
+    await saveUserMessage(conversationId, chatReq.message, subConversationId, chatReq.images);
 
     // 4-5. Fetch history and previous model in parallel (both are reads)
     const [fetchedHistory, previousModelUsed] = await Promise.all([
@@ -274,9 +275,18 @@ async function handleChat(
       }
     }
 
+    // Derive ADE modality: if user uploaded images and isn't in image-gen mode, use "text+image"
+    const hasUploadedImages = chatReq.images && chatReq.images.length > 0;
+    const adeModality = hasUploadedImages
+      ? (chatReq.modality === "image" ? "image" : "text+image")
+      : (chatReq.modality ?? "text");
+
+    // Track whether conversation has user-uploaded images or AI-generated images
+    const conversationHasImages = chatReq.conversationHasImages || hasUploadedImages || false;
+
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
       prompt: chatReq.message,
-      modality: chatReq.modality ?? "text",
+      modality: adeModality,
       userTier: serverTier,
       availableProviders,
       context: {
@@ -285,7 +295,7 @@ async function handleChat(
       },
       humanContext,
       tone: chatReq.tone,
-      conversationHasImages: chatReq.conversationHasImages,
+      conversationHasImages: conversationHasImages || undefined,
       strategy,
     });
 
@@ -413,7 +423,7 @@ async function handleChat(
       textCredits: creditResult ?? undefined,
     };
 
-    // Path A: Dedicated image models (dall-e-3, imagen-4, stable-diffusion-3.5)
+    // Path A: Dedicated image models (gpt-image-1.5, imagen-4, stable-diffusion-3.5)
     if (enableImageGeneration && isImageGenerationModel(model.id)) {
       const start = Date.now();
       try {
@@ -1083,7 +1093,7 @@ interface ApiCallLogEntry {
  */
 const FALLBACK_IMAGE_MODELS = [
   { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "openai", envKey: "OPENAI_API_KEY" },
-  { id: "dall-e-3", name: "DALL-E 3", provider: "openai", envKey: "OPENAI_API_KEY" },
+  { id: "gpt-image-1", name: "GPT Image 1", provider: "openai", envKey: "OPENAI_API_KEY" },
   { id: "imagen-4", name: "Imagen 4", provider: "google", envKey: "GOOGLE_API_KEY" },
   { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "stability", envKey: "STABILITY_API_KEY" },
 ];
@@ -1253,13 +1263,38 @@ async function streamFromProvider(
     }
 
     const provider = getProvider(model.provider as SupportedProvider);
+
+    // Build messages, carrying images through for vision-capable models
+    const providerMessages = history.map((m) => {
+      const msg: import("@/lib/types").ConversationMessage = {
+        role: m.role as "user" | "assistant" | "system",
+        content: m.content,
+      };
+      if (m.images && m.images.length > 0) {
+        if (supportsVision(model.id)) {
+          msg.images = m.images;
+        }
+        // For non-vision models, images are silently stripped —
+        // the user message text still goes through normally
+      }
+      return msg;
+    });
+
+    // If images were attached to the current request but not yet in history
+    // (e.g. freshly uploaded), attach them to the last user message
+    if (hasUploadedImages && supportsVision(model.id)) {
+      for (let i = providerMessages.length - 1; i >= 0; i--) {
+        if (providerMessages[i]!.role === "user" && !providerMessages[i]!.images) {
+          providerMessages[i]!.images = chatReq.images;
+          break;
+        }
+      }
+    }
+
     const providerStream = provider.stream({
       modelId: model.id,
       systemPrompt,
-      messages: history.map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
-      })),
+      messages: providerMessages,
       enableThinking,
       enableWebSearch,
       enableImageGeneration,

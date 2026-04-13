@@ -28,7 +28,7 @@ export async function generateImage(
 
   switch (provider) {
     case "openai":
-      return generateOpenAIImage(modelId, trimmedPrompt, { quality: mapOpenAIQuality(modelId, quality) as "low" | "medium" | "high" | "auto" | "standard" | "hd" });
+      return generateOpenAIImage(modelId, trimmedPrompt, { quality: mapOpenAIQuality(modelId, quality) as "low" | "medium" | "high" | "auto" });
     case "google":
       return generateGoogleImage(modelId, trimmedPrompt);
     case "stability":
@@ -38,18 +38,13 @@ export async function generateImage(
   }
 }
 
-/** Map our quality levels to OpenAI's quality parameters */
-function mapOpenAIQuality(modelId: string, quality: ImageQuality): string {
-  const GPT_IMAGE_MODELS = new Set(["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"]);
-  if (GPT_IMAGE_MODELS.has(modelId)) {
-    // GPT Image models use: low, medium, high, auto
-    switch (quality) {
-      case "standard": return "medium";
-      case "hd": return "high";
-      case "ultra": return "high";
-      default: return "auto";
-    }
+/** Map our quality levels to OpenAI GPT Image quality parameters */
+function mapOpenAIQuality(_modelId: string, quality: ImageQuality): string {
+  // GPT Image models use: low, medium, high, auto
+  switch (quality) {
+    case "standard": return "medium";
+    case "hd": return "high";
+    case "ultra": return "high";
+    default: return "auto";
   }
-  // DALL-E 3 uses: standard, hd
-  return quality === "ultra" || quality === "hd" ? "hd" : "standard";
 }

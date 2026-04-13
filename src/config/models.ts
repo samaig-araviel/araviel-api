@@ -50,7 +50,6 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-image-1.5": { inputPerMillion: 0, outputPerMillion: 34 },
   "gpt-image-1-mini": { inputPerMillion: 0, outputPerMillion: 8 },
   "gpt-image-1": { inputPerMillion: 0, outputPerMillion: 19 },
-  "dall-e-3": { inputPerMillion: 40, outputPerMillion: 80 },
   "imagen-4": { inputPerMillion: 40, outputPerMillion: 60 },
   "imagen-3": { inputPerMillion: 40, outputPerMillion: 60 },
   "stable-diffusion-3.5": { inputPerMillion: 30, outputPerMillion: 50 },
