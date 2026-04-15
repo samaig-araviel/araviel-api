@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from "@/lib/auth";
 import { getUserSubscription, getTextCreditState } from "@/lib/subscription";
 import { getBalance } from "@/lib/credits";
 import { corsHeaders, handleCorsOptions } from "../cors";
+import { requestContext, withRequestId } from "@/lib/request-context";
+import { respondError } from "@/lib/error-response";
 
 export const runtime = "nodejs";
 
@@ -13,6 +15,7 @@ export async function OPTIONS(request: NextRequest) {
 
 export const GET = withAuth(async (request: NextRequest, user: AuthenticatedUser) => {
   const origin = request.headers.get("origin");
+  const ctx = requestContext(request, "subscription.get");
   try {
     const subscription = await getUserSubscription(user.id);
     const tier = subscription?.tier ?? "free";
@@ -47,13 +50,12 @@ export const GET = withAuth(async (request: NextRequest, user: AuthenticatedUser
           cycleResetsAt: imageBalance.cycleResetsAt,
         },
       },
-      { status: 200, headers: corsHeaders(origin) }
+      {
+        status: 200,
+        headers: withRequestId(corsHeaders(origin), ctx.requestId),
+      }
     );
   } catch (err) {
-    console.error("[subscription] Error fetching subscription:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Failed to fetch subscription" },
-      { status: 500, headers: corsHeaders(origin) }
-    );
+    return respondError(err, ctx.log, { requestId: ctx.requestId, origin });
   }
 });

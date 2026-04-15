@@ -1,5 +1,8 @@
 import { getSupabase } from "./supabase";
 import { getTextCreditConfig } from "./stripe";
+import { logger } from "./logger";
+
+const log = logger.child({ module: "subscription" });
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -99,7 +102,7 @@ export async function upsertSubscription(data: {
   });
 
   if (error) {
-    console.error("[subscription] Upsert failed:", error.message);
+    log.error("Subscription upsert failed", error);
     throw new Error(`Failed to upsert subscription: ${error.message}`);
   }
 }
@@ -174,9 +177,11 @@ export async function checkAndConsumeTextCredit(
   const config = getTextCreditConfig(tier, firstMonth);
 
   if (firstMonth && config.firstMonthBonus > 0) {
-    console.log(
-      `[subscription] First-month bonus applied: user=${userId} tier=${tier} bonus=${config.firstMonthBonus}`
-    );
+    log.info("First-month bonus applied", {
+      userId,
+      tier,
+      bonus: config.firstMonthBonus,
+    });
   }
 
   const { data, error } = await sb.rpc("consume_text_credit", {
@@ -187,7 +192,7 @@ export async function checkAndConsumeTextCredit(
   });
 
   if (error) {
-    console.error("[subscription] consume_text_credit RPC failed:", error.message);
+    log.error("consume_text_credit RPC failed", error);
     // Graceful fallback: allow the request
     return {
       allowed: true,
@@ -224,9 +229,11 @@ export async function getTextCreditState(
   const config = getTextCreditConfig(tier, firstMonth);
 
   if (firstMonth && config.firstMonthBonus > 0) {
-    console.log(
-      `[subscription] First-month bonus active (read): user=${userId} tier=${tier} bonus=${config.firstMonthBonus}`
-    );
+    log.info("First-month bonus active (read)", {
+      userId,
+      tier,
+      bonus: config.firstMonthBonus,
+    });
   }
 
   const { data, error } = await sb.rpc("get_text_credit_state", {
@@ -237,7 +244,7 @@ export async function getTextCreditState(
   });
 
   if (error) {
-    console.error("[subscription] get_text_credit_state RPC failed:", error.message);
+    log.error("get_text_credit_state RPC failed", error);
     return {
       monthlyUsed: 0,
       monthlyLimit: config.monthly + config.firstMonthBonus,
@@ -267,6 +274,6 @@ export async function resetMonthlyTextCredits(userId: string): Promise<void> {
   });
 
   if (error) {
-    console.error("[subscription] resetMonthlyTextCredits failed:", error.message);
+    log.error("resetMonthlyTextCredits failed", error);
   }
 }

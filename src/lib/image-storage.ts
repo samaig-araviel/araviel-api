@@ -1,6 +1,8 @@
 import { getSupabase } from "./supabase";
 import { randomUUID } from "crypto";
+import { logger } from "./logger";
 
+const log = logger.child({ module: "image-storage" });
 const BUCKET = "generated-images";
 
 interface UploadResult {
@@ -106,7 +108,7 @@ export async function saveImageMetadata(meta: ImageMetadata): Promise<void> {
   });
 
   if (dbError) {
-    console.error("[image-storage] Failed to save image metadata:", dbError.message);
+    log.error("Failed to save image metadata", dbError);
     // Don't throw — the image is already in Storage and usable.
     // The metadata row can be backfilled later if needed.
   }

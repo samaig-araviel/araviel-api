@@ -1,4 +1,7 @@
 import { getSupabase } from "./supabase";
+import { logger } from "./logger";
+
+const log = logger.child({ module: "credits" });
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -207,7 +210,7 @@ export async function chargeCredits(
   });
 
   if (error) {
-    console.error("[credits] consume_image_credit RPC failed:", error.message);
+    log.error("consume_image_credit RPC failed", error);
     throw new Error(`Failed to charge image credits: ${error.message}`);
   }
 
@@ -231,7 +234,7 @@ export async function addPack(
   packType: string,
   options?: { amountCents?: number; status?: "pending" | "completed" }
 ): Promise<{ packId: string; credits: number; expiresAt: string }> {
-  console.log("[addPack] Starting with:", { userId, packType, options });
+  log.debug("addPack starting", { userId, packType, amountCents: options?.amountCents, status: options?.status });
 
   // Validate input
   if (!userId || typeof userId !== "string") {
@@ -246,12 +249,12 @@ export async function addPack(
     throw new Error(`Invalid pack type: "${packType}". Valid types: ${Object.keys(PACK_DEFINITIONS).join(", ")}`);
   }
 
-  console.log("[addPack] Validations passed, pack definition:", packDef);
+  log.debug("addPack validations passed", { packDef });
 
   // Ensure account exists FIRST before creating pack records
-  console.log("[addPack] Creating or fetching account for:", userId);
+  log.debug("addPack ensuring account", { userId });
   await getOrCreateAccount(userId);
-  console.log("[addPack] Account ready");
+  log.debug("addPack account ready", { userId });
 
   const sb = getSupabase();
   const now = new Date();
@@ -259,7 +262,7 @@ export async function addPack(
   const amountCents = options?.amountCents ?? 0;
   const status = options?.status ?? "completed";
 
-  console.log("[addPack] Creating transaction record with:", {
+  log.debug("addPack creating transaction", {
     userId,
     packType,
     credits: packDef.credits,
@@ -283,12 +286,12 @@ export async function addPack(
     .single();
 
   if (txnError) {
-    console.error("[addPack] ❌ Transaction insert failed:", txnError);
+    log.error("addPack transaction insert failed", txnError, { userId, packType });
     throw new Error(`Failed to create transaction: ${txnError.message}`);
   }
-  console.log("[addPack] ✅ Transaction created with id:", txn.id);
+  log.info("addPack transaction created", { transactionId: txn.id, userId });
 
-  console.log("[addPack] Creating pack record with:", {
+  log.debug("addPack creating pack record", {
     userId,
     transactionId: txn.id,
     creditsTotal: packDef.credits,
@@ -311,11 +314,11 @@ export async function addPack(
     .single();
 
   if (packError) {
-    console.error("[addPack] ❌ Pack insert failed:", packError);
+    log.error("addPack pack insert failed", packError, { userId, packType, transactionId: txn.id });
     throw new Error(`Failed to create pack: ${packError.message}`);
   }
 
-  console.log("[addPack] ✅ Pack created successfully with id:", pack.id);
+  log.info("addPack completed", { packId: pack.id, userId, packType });
 
   return {
     packId: pack.id,

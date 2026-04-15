@@ -1,4 +1,7 @@
 import type { ADEResponse } from "@/lib/types";
+import { logger } from "./logger";
+
+const log = logger.child({ module: "ade" });
 
 interface ADERequestContext {
   conversationId?: string;
@@ -102,7 +105,11 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
       if (!res.ok) {
         const errorText = await res.text().catch(() => "Unknown error");
         lastError = new Error(`ADE request failed (${res.status}): ${errorText}`);
-        console.warn(`[ADE] Attempt ${attempt + 1} failed (${res.status}): ${errorText}`);
+        log.warn("ADE upstream request failed", {
+          attempt: attempt + 1,
+          status: res.status,
+          error: errorText,
+        });
         continue;
       }
 
@@ -117,7 +124,7 @@ export async function callADE(request: ADERequest): Promise<ADECallResult> {
           ? err.message
           : "Unknown ADE error";
       lastError = new Error(message);
-      console.warn(`[ADE] Attempt ${attempt + 1} failed: ${message}`);
+      log.warn("ADE call failed", { attempt: attempt + 1, message });
     }
   }
 
