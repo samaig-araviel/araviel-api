@@ -1,5 +1,7 @@
 import { getSupabase } from "./supabase";
+import { logger } from "./logger";
 
+const log = logger.child({ module: "guest-cleanup" });
 const STORAGE_BUCKET = "generated-images";
 const CHUNK_SIZE = 500;
 const USER_BATCH_SIZE = 10;
@@ -54,7 +56,7 @@ export async function cleanupExpiredGuestData(
     } = await supabase.auth.admin.listUsers({ page, perPage });
 
     if (error) {
-      console.error("[guest-cleanup] Failed to list users:", error.message);
+      log.error("Failed to list users", error);
       break;
     }
 
@@ -69,12 +71,12 @@ export async function cleanupExpiredGuestData(
   }
 
   if (anonUserIds.length === 0) {
-    console.log("[guest-cleanup] No expired anonymous users found.");
+    log.info("No expired anonymous users found");
     result.durationMs = Date.now() - start;
     return result;
   }
 
-  console.log(`[guest-cleanup] Found ${anonUserIds.length} expired anonymous user(s).`);
+  log.info("Found expired anonymous users", { count: anonUserIds.length });
 
   // ── Step 2: Process users in batches ──────────────────────────────────
   for (let i = 0; i < anonUserIds.length; i += USER_BATCH_SIZE) {
@@ -91,14 +93,14 @@ export async function cleanupExpiredGuestData(
         // Remove the anonymous auth entry last
         const { error: deleteUserErr } = await supabase.auth.admin.deleteUser(userId);
         if (deleteUserErr) {
-          console.error(`[guest-cleanup] Failed to delete auth user ${userId}:`, deleteUserErr.message);
+          log.error("Failed to delete auth user", deleteUserErr, { userId });
           result.errors.push({ userId, error: `auth delete: ${deleteUserErr.message}` });
         } else {
           result.usersDeleted++;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[guest-cleanup] Error cleaning up user ${userId}:`, msg);
+        log.error("Error cleaning up user", err, { userId });
         result.errors.push({ userId, error: msg });
       }
 
@@ -107,15 +109,16 @@ export async function cleanupExpiredGuestData(
   }
 
   result.durationMs = Date.now() - start;
-  console.log(
-    `[guest-cleanup] Done. ` +
-    `Users: ${result.usersDeleted}/${result.usersProcessed}, ` +
-    `Conversations: ${result.conversationsDeleted}, ` +
-    `Messages: ${result.messagesDeleted}, ` +
-    `Images: ${result.imagesDeleted} (${result.storageFilesDeleted} files), ` +
-    `Errors: ${result.errors.length}, ` +
-    `Duration: ${result.durationMs}ms`
-  );
+  log.info("Guest cleanup complete", {
+    usersDeleted: result.usersDeleted,
+    usersProcessed: result.usersProcessed,
+    conversationsDeleted: result.conversationsDeleted,
+    messagesDeleted: result.messagesDeleted,
+    imagesDeleted: result.imagesDeleted,
+    storageFilesDeleted: result.storageFilesDeleted,
+    errors: result.errors.length,
+    durationMs: result.durationMs,
+  });
 
   return result;
 }
@@ -203,7 +206,7 @@ async function deleteAllUserData(
           .from(STORAGE_BUCKET)
           .remove(pathChunk);
         if (storageErr) {
-          console.error(`[guest-cleanup] Storage delete error for user ${userId}:`, storageErr.message);
+          log.error("Storage delete error", storageErr, { userId });
         } else {
           counts.storageFiles += pathChunk.length;
         }
@@ -266,7 +269,7 @@ async function chunkedDelete(
     const chunk = ids.slice(i, i + CHUNK_SIZE);
     const { error } = await supabase.from(table).delete().in(column, chunk);
     if (error) {
-      console.error(`[guest-cleanup] Failed to delete from ${table}.${column}:`, error.message);
+      log.error("Chunked delete failed", error, { table, column });
     }
   }
 }

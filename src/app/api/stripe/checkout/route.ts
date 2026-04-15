@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from "@/lib/auth";
 import { getStripe, getPriceId, getApexUrl } from "@/lib/stripe";
 import { getStripeCustomerId, upsertSubscription } from "@/lib/subscription";
 import { corsHeaders, handleCorsOptions } from "../../cors";
+import { requestContext, withRequestId } from "@/lib/request-context";
+import { respondError, badRequest, internalError } from "@/lib/error-response";
 
 export const runtime = "nodejs";
 
@@ -13,29 +15,30 @@ export async function OPTIONS(request: NextRequest) {
 
 export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUser) => {
   const origin = request.headers.get("origin");
+  const ctx = requestContext(request, "stripe.checkout");
   try {
     const body = await request.json();
     const { tier, interval } = body;
 
     // Validate input
     if (!tier || !["lite", "pro"].includes(tier)) {
-      return NextResponse.json(
-        { error: "Invalid tier. Must be 'lite' or 'pro'." },
-        { status: 400, headers: corsHeaders(origin) }
+      throw badRequest(
+        "Invalid tier. Must be 'lite' or 'pro'.",
+        "Please pick a plan."
       );
     }
     if (!interval || !["monthly", "annual"].includes(interval)) {
-      return NextResponse.json(
-        { error: "Invalid interval. Must be 'monthly' or 'annual'." },
-        { status: 400, headers: corsHeaders(origin) }
+      throw badRequest(
+        "Invalid interval. Must be 'monthly' or 'annual'.",
+        "Please pick a billing interval."
       );
     }
 
     const priceId = getPriceId(tier, interval);
     if (!priceId) {
-      return NextResponse.json(
-        { error: "Price configuration not found for this tier/interval." },
-        { status: 500, headers: corsHeaders(origin) }
+      throw internalError(
+        "Price configuration not found for this tier/interval.",
+        "That plan isn't available right now."
       );
     }
 
@@ -84,13 +87,12 @@ export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUse
 
     return NextResponse.json(
       { url: session.url },
-      { status: 200, headers: corsHeaders(origin) }
+      {
+        status: 200,
+        headers: withRequestId(corsHeaders(origin), ctx.requestId),
+      }
     );
   } catch (err) {
-    console.error("[stripe/checkout] Error:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Failed to create checkout session" },
-      { status: 500, headers: corsHeaders(origin) }
-    );
+    return respondError(err, ctx.log, { requestId: ctx.requestId, origin });
   }
 });

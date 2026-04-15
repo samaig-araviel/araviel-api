@@ -5,6 +5,8 @@ import { getStripe, getPackPriceId, getApexUrl } from "@/lib/stripe";
 import { getStripeCustomerId, upsertSubscription } from "@/lib/subscription";
 import { PACK_DEFINITIONS } from "@/lib/credits";
 import { corsHeaders, handleCorsOptions } from "../../cors";
+import { requestContext, withRequestId } from "@/lib/request-context";
+import { respondError, badRequest, internalError } from "@/lib/error-response";
 
 export const runtime = "nodejs";
 
@@ -15,34 +17,32 @@ export async function OPTIONS(request: NextRequest) {
 export const POST = withAuth(
   async (request: NextRequest, user: AuthenticatedUser) => {
     const origin = request.headers.get("origin");
+    const ctx = requestContext(request, "stripe.checkout-pack");
     try {
       const body = await request.json();
       const { packType } = body;
 
       // Validate input
       if (!packType || !["starter", "creator", "studio"].includes(packType)) {
-        return NextResponse.json(
-          {
-            error:
-              "Invalid packType. Must be 'starter', 'creator', or 'studio'.",
-          },
-          { status: 400, headers: corsHeaders(origin) }
+        throw badRequest(
+          "Invalid packType. Must be 'starter', 'creator', or 'studio'.",
+          "Please choose a valid credit pack."
         );
       }
 
       const packDef = PACK_DEFINITIONS[packType];
       if (!packDef) {
-        return NextResponse.json(
-          { error: "Pack definition not found" },
-          { status: 500, headers: corsHeaders(origin) }
+        throw internalError(
+          "Pack definition not found",
+          "That pack is not available right now."
         );
       }
 
       const priceId = getPackPriceId(packType);
       if (!priceId) {
-        return NextResponse.json(
-          { error: "Price configuration not found for this pack." },
-          { status: 500, headers: corsHeaders(origin) }
+        throw internalError(
+          "Price configuration not found for pack",
+          "That pack is not available right now."
         );
       }
 
@@ -84,17 +84,13 @@ export const POST = withAuth(
 
       return NextResponse.json(
         { url: session.url },
-        { status: 200, headers: corsHeaders(origin) }
+        {
+          status: 200,
+          headers: withRequestId(corsHeaders(origin), ctx.requestId),
+        }
       );
     } catch (err) {
-      console.error(
-        "[stripe/checkout-pack] Error:",
-        err instanceof Error ? err.message : err
-      );
-      return NextResponse.json(
-        { error: "Failed to create checkout session" },
-        { status: 500, headers: corsHeaders(origin) }
-      );
+      return respondError(err, ctx.log, { requestId: ctx.requestId, origin });
     }
   }
 );

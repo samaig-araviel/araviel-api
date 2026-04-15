@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from "@/lib/auth";
 import { getStripe, getApexUrl } from "@/lib/stripe";
 import { getStripeCustomerId } from "@/lib/subscription";
 import { corsHeaders, handleCorsOptions } from "../../cors";
+import { requestContext, withRequestId } from "@/lib/request-context";
+import { respondError, badRequest } from "@/lib/error-response";
 
 export const runtime = "nodejs";
 
@@ -13,13 +15,14 @@ export async function OPTIONS(request: NextRequest) {
 
 export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUser) => {
   const origin = request.headers.get("origin");
+  const ctx = requestContext(request, "stripe.portal");
   try {
     const customerId = await getStripeCustomerId(user.id);
 
     if (!customerId) {
-      return NextResponse.json(
-        { error: "No active subscription found. Subscribe first." },
-        { status: 400, headers: corsHeaders(origin) }
+      throw badRequest(
+        "No active subscription found.",
+        "You don't have an active subscription. Choose a plan to get started."
       );
     }
 
@@ -33,13 +36,12 @@ export const POST = withAuth(async (request: NextRequest, user: AuthenticatedUse
 
     return NextResponse.json(
       { url: session.url },
-      { status: 200, headers: corsHeaders(origin) }
+      {
+        status: 200,
+        headers: withRequestId(corsHeaders(origin), ctx.requestId),
+      }
     );
   } catch (err) {
-    console.error("[stripe/portal] Error:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Failed to create portal session" },
-      { status: 500, headers: corsHeaders(origin) }
-    );
+    return respondError(err, ctx.log, { requestId: ctx.requestId, origin });
   }
 });

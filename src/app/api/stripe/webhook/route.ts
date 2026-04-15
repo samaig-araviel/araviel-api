@@ -9,9 +9,12 @@ import {
 import { updateTier, addPack, resetMonthlyImageCredits, PACK_DEFINITIONS } from "@/lib/credits";
 import { getSupabase } from "@/lib/supabase";
 import { WebhookBadRequestError, WebhookRetryableError } from "@/lib/webhook-errors";
+import { logger, Logger } from "@/lib/logger";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
+
+const baseLog = logger.child({ route: "stripe.webhook" });
 
 /**
  * Stripe webhook handler. No auth middleware — uses Stripe signature verification.
@@ -26,7 +29,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
-    console.error("[stripe/webhook] Missing STRIPE_WEBHOOK_SECRET");
+    baseLog.error("Missing STRIPE_WEBHOOK_SECRET env var");
     return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
 
@@ -35,7 +38,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const signature = request.headers.get("stripe-signature");
 
   if (!signature) {
-    console.error("[stripe/webhook] Missing stripe-signature header");
+    baseLog.warn("Missing stripe-signature header");
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
   }
 
@@ -43,21 +46,20 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-    console.log("[stripe/webhook] Signature verified | Event:", event.type, "| ID:", event.id);
   } catch (err) {
-    console.error(
-      "[stripe/webhook] Signature verification failed:",
-      err instanceof Error ? err.message : err
-    );
+    baseLog.error("Signature verification failed", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
+
+  const eventLog = baseLog.child({ eventId: event.id, eventType: event.type });
+  eventLog.info("Signature verified");
 
   // ── Idempotency check ──────────────────────────────────────────────────
   let isDuplicate: boolean;
   try {
-    isDuplicate = await checkAndRecordEvent(event.id, event.type);
+    isDuplicate = await checkAndRecordEvent(event.id, event.type, eventLog);
   } catch (err) {
-    console.error("[stripe/webhook] Idempotency check failed:", err instanceof Error ? err.message : err);
+    eventLog.error("Idempotency check failed", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 
@@ -67,20 +69,20 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // ── Process the event ──────────────────────────────────────────────────
   try {
-    console.log("[stripe/webhook] Processing event:", event.type);
+    eventLog.info("Processing event");
 
     switch (event.type) {
       case "checkout.session.completed":
-        await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session, eventLog);
         break;
       case "customer.subscription.updated":
-        await handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
+        await handleSubscriptionUpdated(event.data.object as Stripe.Subscription, eventLog);
         break;
       case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription, eventLog);
         break;
       case "invoice.payment_failed":
-        await handlePaymentFailed(event.data.object as Stripe.Invoice);
+        await handlePaymentFailed(event.data.object as Stripe.Invoice, eventLog);
         break;
       default:
         // Unhandled event type — acknowledge without processing
@@ -90,12 +92,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    const errorStack = err instanceof Error ? err.stack : undefined;
-    console.error(`[stripe/webhook] Error processing ${event.type}:`, {
-      eventId: event.id,
-      error: errorMessage,
-      stack: errorStack,
-    });
+    eventLog.error("Error processing event", err);
 
     if (err instanceof WebhookBadRequestError) {
       // Permanent failure — keep the event record to prevent re-processing
@@ -103,7 +100,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Transient failure — remove the event record so Stripe's retry can re-process
-    await rollbackEventRecord(event.id);
+    await rollbackEventRecord(event.id, eventLog);
 
     return NextResponse.json({ error: "Processing failed" }, { status: 500 });
   }
@@ -117,7 +114,11 @@ export async function POST(request: NextRequest): Promise<Response> {
  * stripe_events.id — concurrent inserts for the same ID will have
  * exactly one succeed and the rest fail with code 23505.
  */
-async function checkAndRecordEvent(eventId: string, eventType: string): Promise<boolean> {
+async function checkAndRecordEvent(
+  eventId: string,
+  eventType: string,
+  log: Logger
+): Promise<boolean> {
   const sb = getSupabase();
   const { error } = await sb
     .from("stripe_events")
@@ -126,7 +127,7 @@ async function checkAndRecordEvent(eventId: string, eventType: string): Promise<
   if (error) {
     // Postgres unique violation = already processed
     if (error.code === "23505") {
-      console.log(`[stripe/webhook] Duplicate event ${eventId}, skipping`);
+      log.info("Duplicate event, skipping");
       return true;
     }
     // Any other DB error is transient
@@ -140,24 +141,22 @@ async function checkAndRecordEvent(eventId: string, eventType: string): Promise<
  * Remove a stripe_events record so the event can be retried.
  * Called when processing fails with a transient error.
  */
-async function rollbackEventRecord(eventId: string): Promise<void> {
+async function rollbackEventRecord(eventId: string, log: Logger): Promise<void> {
   try {
     const sb = getSupabase();
     await sb.from("stripe_events").delete().eq("id", eventId);
   } catch (deleteErr) {
-    console.error(
-      "[stripe/webhook] Failed to rollback event record:",
-      deleteErr instanceof Error ? deleteErr.message : deleteErr
-    );
+    log.error("Failed to rollback event record", deleteErr);
   }
 }
 
 // ─── Event Handlers ───────────────────────────────────────────────────────────
 
 async function handleCheckoutCompleted(
-  session: Stripe.Checkout.Session
+  session: Stripe.Checkout.Session,
+  log: Logger
 ): Promise<void> {
-  console.log("[stripe/webhook] checkout.session.completed | mode:", session.mode);
+  log.info("checkout.session.completed", { mode: session.mode });
 
   const userId = session.metadata?.userId;
   if (!userId) {
@@ -168,7 +167,7 @@ async function handleCheckoutCompleted(
 
   // Pack purchase (payment mode) vs subscription
   if (checkoutType === "pack") {
-    return handlePackPurchase(session, userId);
+    return handlePackPurchase(session, userId, log);
   }
 
   // Subscription checkout
@@ -237,14 +236,17 @@ async function handleCheckoutCompleted(
     );
   }
 
-  console.log(
-    `[stripe/webhook] Checkout completed: user=${userId} tier=${tierInfo.tier} interval=${tierInfo.interval}`
-  );
+  log.info("Checkout completed", {
+    userId,
+    tier: tierInfo.tier,
+    interval: tierInfo.interval,
+  });
 }
 
 async function handlePackPurchase(
   session: Stripe.Checkout.Session,
-  userId: string
+  userId: string,
+  log: Logger
 ): Promise<void> {
   const packType = session.metadata?.packType;
   if (!packType) {
@@ -264,9 +266,12 @@ async function handlePackPurchase(
       status: "completed",
     });
 
-    console.log(
-      `[stripe/webhook] Pack purchase succeeded: user=${userId} pack=${packType} credits=${result.credits} expires=${result.expiresAt}`
-    );
+    log.info("Pack purchase succeeded", {
+      userId,
+      packType,
+      credits: result.credits,
+      expiresAt: result.expiresAt,
+    });
   } catch (err) {
     throw new WebhookRetryableError(
       `Failed to create pack: ${err instanceof Error ? err.message : err}`
@@ -275,7 +280,8 @@ async function handlePackPurchase(
 }
 
 async function handleSubscriptionUpdated(
-  subscription: Stripe.Subscription
+  subscription: Stripe.Subscription,
+  log: Logger
 ): Promise<void> {
   const userId = subscription.metadata?.userId;
   if (!userId) {
@@ -327,9 +333,11 @@ async function handleSubscriptionUpdated(
   const isRenewal = existing?.firstMonth === true && newFirstMonth === false;
 
   if (existing?.firstMonth !== newFirstMonth) {
-    console.log(
-      `[stripe/webhook] firstMonth transition: user=${userId} ${existing?.firstMonth ?? null} → ${newFirstMonth}`
-    );
+    log.info("firstMonth transition", {
+      userId,
+      from: existing?.firstMonth ?? null,
+      to: newFirstMonth,
+    });
   }
 
   try {
@@ -379,13 +387,17 @@ async function handleSubscriptionUpdated(
     }
   }
 
-  console.log(
-    `[stripe/webhook] Subscription updated: user=${userId} tier=${tierInfo.tier} status=${status} renewal=${isRenewal}`
-  );
+  log.info("Subscription updated", {
+    userId,
+    tier: tierInfo.tier,
+    status,
+    renewal: isRenewal,
+  });
 }
 
 async function handleSubscriptionDeleted(
-  subscription: Stripe.Subscription
+  subscription: Stripe.Subscription,
+  log: Logger
 ): Promise<void> {
   const userId = subscription.metadata?.userId;
   if (!userId) {
@@ -415,10 +427,10 @@ async function handleSubscriptionDeleted(
     );
   }
 
-  console.log(`[stripe/webhook] Subscription deleted: user=${userId} → free tier`);
+  log.info("Subscription deleted", { userId, tier: "free" });
 }
 
-async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
+async function handlePaymentFailed(invoice: Stripe.Invoice, log: Logger): Promise<void> {
   const customerId = invoice.customer as string;
   if (!customerId) {
     throw new WebhookBadRequestError("invoice.payment_failed missing customer ID");
@@ -456,5 +468,5 @@ async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
     );
   }
 
-  console.log(`[stripe/webhook] Payment failed: user=${data.user_id} → past_due`);
+  log.info("Payment failed", { userId: data.user_id, status: "past_due" });
 }

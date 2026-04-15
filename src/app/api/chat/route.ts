@@ -43,6 +43,8 @@ import type { TextCreditState } from "@/lib/subscription";
 import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
+import { logger } from "@/lib/logger";
+import { requestContext } from "@/lib/request-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -74,8 +76,10 @@ export async function POST(request: NextRequest) {
   });
 
   handleChat(request, writer, encoder, user).catch(async (err) => {
-    const rawMessage = err instanceof Error ? err.message : "Unknown error";
-    console.error("[chat] Unhandled error in handleChat:", rawMessage, err instanceof Error ? err.stack : "");
+    logger.error("Unhandled error in handleChat", err, {
+      route: "chat",
+      userId: user.id,
+    });
 
     const errorEvent: StreamEvent = {
       type: "error",
@@ -105,6 +109,8 @@ async function handleChat(
   encoder: TextEncoder,
   user: AuthenticatedUser
 ): Promise<void> {
+  const ctx = requestContext(request, "chat");
+  const log = ctx.log.child({ userId: user.id });
   try {
     // 1. Parse and validate
     const body = await request.json();
@@ -203,7 +209,7 @@ async function handleChat(
     const [fetchedHistory, previousModelUsed] = await Promise.all([
       fetchConversationHistory(conversationId, subConversationId),
       getPreviousModelId(conversationId).catch((err) => {
-        console.warn("[chat] getPreviousModelId failed (non-critical):", err instanceof Error ? err.message : err);
+        log.warn("getPreviousModelId failed (non-critical)", {}, err);
         return undefined;
       }),
     ]);
@@ -453,7 +459,7 @@ async function handleChat(
             size: imageResult.size, style: imageResult.style,
           });
         } catch (uploadErr) {
-          console.error("[chat] Image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+          log.error("Image storage upload failed", uploadErr, { stage: "primary" });
         }
 
         // Charge credits after successful upload, before confirming the image to the client.
@@ -474,7 +480,7 @@ async function handleChat(
             }
             creditInfo.preChargedResult = chargeResult;
           } catch (chargeErr) {
-            console.error("[chat] Image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+            log.error("Image credit charge failed", chargeErr, { stage: "primary" });
             await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
             await writer.close();
             return;
@@ -578,7 +584,7 @@ async function handleChat(
                 size: backupImageResult.size, style: backupImageResult.style,
               });
             } catch (uploadErr) {
-              console.error("[chat] Backup image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+              log.error("Image storage upload failed", uploadErr, { stage: "backup" });
             }
 
             // Charge credits after successful upload, before confirming image to client.
@@ -598,7 +604,7 @@ async function handleChat(
                 }
                 creditInfo.preChargedResult = chargeResult;
               } catch (chargeErr) {
-                console.error("[chat] Backup image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+                log.error("Image credit charge failed", chargeErr, { stage: "backup" });
                 await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
                 await writer.close();
                 return;
@@ -723,7 +729,7 @@ async function handleChat(
                 size: imageResult.size, style: imageResult.style,
               });
             } catch (uploadErr) {
-              console.error("[chat] Fallback image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+              log.error("Image storage upload failed", uploadErr, { stage: "fallback" });
             }
 
             // Charge credits after successful upload, before confirming image to client.
@@ -743,7 +749,7 @@ async function handleChat(
                 }
                 creditInfo.preChargedResult = chargeResult;
               } catch (chargeErr) {
-                console.error("[chat] Fallback image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+                log.error("Image credit charge failed", chargeErr, { stage: "fallback" });
                 await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
                 await writer.close();
                 return;
@@ -959,7 +965,12 @@ async function handleChat(
               return;
             }
           }
-          console.error(`[chat] All providers failed. Primary: ${model.id} (${model.provider}), Backup: ${backup.id} (${backup.provider}). Errors logged in apiCallLogs.`);
+          log.error("All providers failed", undefined, {
+            primaryModel: model.id,
+            primaryProvider: model.provider,
+            backupModel: backup.id,
+            backupProvider: backup.provider,
+          });
           await sendSSE(writer, encoder, {
             type: "error",
             data: {
@@ -1002,7 +1013,11 @@ async function handleChat(
             return;
           }
         }
-        console.error(`[chat] Primary model failed with no backup available. Model: ${model.id} (${model.provider}), Error: ${streamResult.error}`);
+        log.error("Primary model failed with no backup available", undefined, {
+          model: model.id,
+          provider: model.provider,
+          upstreamError: streamResult.error,
+        });
         await sendSSE(writer, encoder, {
           type: "error",
           data: {
@@ -1042,7 +1057,7 @@ async function handleChat(
       userMessage = "Unable to save your message. Please try again.";
       code = "DB_ERROR";
     }
-    console.error(`[chat] Fatal error: ${rawMessage}`);
+    log.error("Fatal chat error", err);
     try {
       await sendSSE(writer, encoder, {
         type: "error",
@@ -1116,6 +1131,7 @@ async function tryDedicatedImageFallback(
   pendingImages?: PendingImageMeta[],
   creditInfo?: { userId?: string; imageQuality?: string; preChargedResult?: ChargeResult }
 ): Promise<StreamResult | null> {
+  const log = logger.child({ route: "chat", subRoute: "dedicated-image-fallback" });
   for (const imgModel of FALLBACK_IMAGE_MODELS) {
     // Skip models whose API key is not configured
     if (!process.env[imgModel.envKey]) continue;
@@ -1165,7 +1181,7 @@ async function tryDedicatedImageFallback(
             });
           }
         } catch (uploadErr) {
-          console.error("[chat] Dedicated fallback image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+          log.error("Image storage upload failed", uploadErr, { stage: "dedicated-fallback" });
         }
       }
 
@@ -1186,7 +1202,7 @@ async function tryDedicatedImageFallback(
           }
           if (creditInfo) creditInfo.preChargedResult = chargeResult;
         } catch (chargeErr) {
-          console.error("[chat] Dedicated fallback image credit charge failed:", chargeErr instanceof Error ? chargeErr.message : chargeErr);
+          log.error("Image credit charge failed", chargeErr, { stage: "dedicated-fallback" });
           await sendSSE(writer, encoder, { type: "error", data: { message: "Failed to charge image credits. Please try again.", code: "CREDIT_CHARGE_FAILED" } });
           await writer.close();
           return null;
@@ -1249,6 +1265,7 @@ async function streamFromProvider(
   pendingImages?: PendingImageMeta[],
   uploadedImages?: ImageAttachment[]
 ): Promise<StreamResult> {
+  const log = logger.child({ route: "chat", subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
   let content = "";
   let thinkingContent = "";
@@ -1399,7 +1416,7 @@ async function streamFromProvider(
                   });
                 }
               } catch (uploadErr) {
-                console.error("[chat] Native image storage upload failed:", uploadErr instanceof Error ? uploadErr.message : uploadErr);
+                log.error("Image storage upload failed", uploadErr, { stage: "native" });
               }
             }
             await sendSSE(writer, encoder, {
@@ -1560,6 +1577,12 @@ async function finalize(
   pendingImages?: PendingImageMeta[],
   creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; textCredits?: TextCreditState; preChargedResult?: ChargeResult }
 ): Promise<void> {
+  const log = logger.child({
+    route: "chat",
+    subRoute: "finalize",
+    conversationId,
+    userId: creditInfo?.userId,
+  });
   const costUsd = calculateCost(model.provider, model.id, result.usage);
 
   const modelUsed = {
@@ -1616,14 +1639,14 @@ async function finalize(
   // Save routing log and API call logs now that message exists
   await saveRoutingLog(messageId, adeResponse, adeLatencyMs);
 
-  for (const log of apiCallLogs) {
+  for (const entry of apiCallLogs) {
     await saveApiCallLog(
       messageId,
-      log.provider,
-      log.modelId,
-      log.statusCode,
-      log.latencyMs,
-      log.errorMessage
+      entry.provider,
+      entry.modelId,
+      entry.statusCode,
+      entry.latencyMs,
+      entry.errorMessage
     );
   }
 
@@ -1658,14 +1681,14 @@ async function finalize(
           remainingBalance: charge.remainingBalance,
         };
       } catch (err) {
-        console.error("[chat] Credit charge failed:", err instanceof Error ? err.message : err);
+        log.error("Credit charge failed", err);
       }
     }
     // Always fetch the fresh balance for an authoritative snapshot to embed in the done event.
     try {
       freshImageBalance = await getBalance(creditInfo.userId);
     } catch (err) {
-      console.error("[chat] Failed to fetch post-charge balance:", err instanceof Error ? err.message : err);
+      log.error("Failed to fetch post-charge balance", err);
     }
   }
 
