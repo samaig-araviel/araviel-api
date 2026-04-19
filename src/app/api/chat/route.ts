@@ -45,6 +45,8 @@ import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 import { logger } from "@/lib/logger";
 import { requestContext } from "@/lib/request-context";
+import { generateConversationTitle } from "@/lib/title-generator";
+import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -188,19 +190,44 @@ async function handleChat(
 
     // 2. Get or create conversation (for sub-conversations, validate and use the parent conversation)
     let conversationId: string;
+    let newConversationPlaceholderTitle: string | null = null;
     const subConversationId = chatReq.subConversationId;
 
     if (subConversationId) {
       const subConv = await validateSubConversation(subConversationId);
       conversationId = subConv.conversationId;
     } else {
-      conversationId = await getOrCreateConversation(
+      const resolved = await getOrCreateConversation(
         chatReq.conversationId,
         chatReq.message,
         chatReq.projectId,
         user.id
       );
+      conversationId = resolved.id;
+      if (resolved.isNew) {
+        newConversationPlaceholderTitle = resolved.placeholderTitle;
+      }
     }
+
+    // 2b. Kick off LLM-based title generation in parallel with the streaming
+    // response. We deliberately keep the promise scoped to *this* request so
+    // the serverless runtime does not terminate the work — fire-and-forget
+    // after the Response returns is unreliable on Vercel. Haiku typically
+    // resolves in well under a second while the main model is still streaming,
+    // so by the time we're ready to emit `done` the title is already ready.
+    // Errors are contained inside generateConversationTitle and surface as
+    // `null` — we never surface title failures to the chat flow.
+    const titleContext: TitleContext | undefined =
+      newConversationPlaceholderTitle !== null
+        ? {
+            placeholderTitle: newConversationPlaceholderTitle,
+            requestId: ctx.requestId,
+            titlePromise: generateConversationTitle(chatReq.message, {
+              signal: request.signal,
+              requestId: ctx.requestId,
+            }),
+          }
+        : undefined;
 
     // 3. Save user message first (must complete before fetching history)
     await saveUserMessage(conversationId, chatReq.message, subConversationId, chatReq.images);
@@ -527,7 +554,8 @@ async function handleChat(
           encoder,
           subConversationId,
           pendingImages,
-          creditInfo
+          creditInfo,
+          titleContext
         );
         return;
       } catch (err) {
@@ -651,7 +679,8 @@ async function handleChat(
               encoder,
               subConversationId,
               pendingImages,
-              creditInfo
+              creditInfo,
+              titleContext
             );
             return;
           } catch (backupErr) {
@@ -796,7 +825,8 @@ async function handleChat(
               encoder,
               subConversationId,
               pendingImages,
-              creditInfo
+              creditInfo,
+              titleContext
             );
             return;
           } catch (err) {
@@ -843,7 +873,8 @@ async function handleChat(
               encoder,
               subConversationId,
               pendingImages,
-              creditInfo
+              creditInfo,
+              titleContext
             );
             return;
           }
@@ -860,7 +891,7 @@ async function handleChat(
           messageId, conversationId, dedicatedFallback,
           model, backupModels, adeResponse, adeLatencyMs,
           apiCallLogs, writer, encoder, subConversationId, pendingImages,
-          creditInfo
+          creditInfo, titleContext
         );
         return;
       }
@@ -893,7 +924,7 @@ async function handleChat(
         messageId, conversationId, helpStreamResult,
         model, backupModels, adeResponse, adeLatencyMs,
         apiCallLogs, writer, encoder, subConversationId, pendingImages,
-        creditInfo
+        creditInfo, titleContext
       );
       return;
     }
@@ -960,7 +991,7 @@ async function handleChat(
                 messageId, conversationId, dedicatedFallback,
                 model, backupModels, adeResponse, adeLatencyMs,
                 apiCallLogs, writer, encoder, subConversationId, pendingImages,
-                creditInfo
+                creditInfo, titleContext
               );
               return;
             }
@@ -995,7 +1026,8 @@ async function handleChat(
           encoder,
           subConversationId,
           pendingImages,
-          creditInfo
+          creditInfo,
+          titleContext
         );
       } else {
         // No backup model — if image gen was requested, try a dedicated image model
@@ -1008,7 +1040,7 @@ async function handleChat(
               messageId, conversationId, dedicatedFallback,
               model, backupModels, adeResponse, adeLatencyMs,
               apiCallLogs, writer, encoder, subConversationId, pendingImages,
-              creditInfo
+              creditInfo, titleContext
             );
             return;
           }
@@ -1042,7 +1074,8 @@ async function handleChat(
         encoder,
         subConversationId,
         pendingImages,
-        creditInfo
+        creditInfo,
+        titleContext
       );
     }
   } catch (err) {
@@ -1562,6 +1595,59 @@ function sanitizeProviderError(rawError: string, _provider: string): string {
   return "Something went wrong. Please try again.";
 }
 
+/**
+ * Resolves to either the promise's result or `null` if the timeout fires
+ * first. Used to bound how long `finalize` waits on title generation.
+ * Never rejects — this is specifically for non-critical, best-effort work.
+ */
+function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise<T | null>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, timeoutMs);
+    promise
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);
+      });
+  });
+}
+
+/**
+ * State captured at conversation-creation time so `finalize` can emit a
+ * `title` SSE event on the open stream if LLM-based title generation
+ * resolved in time. Only ever populated for *newly created* conversations.
+ */
+interface TitleContext {
+  /** Placeholder title that was written at insert time (race-safety guard). */
+  placeholderTitle: string;
+  /** Resolves to the generated title, or `null` on failure/timeout/empty. */
+  titlePromise: Promise<string | null>;
+  /** Request id for log correlation. */
+  requestId: string;
+}
+
+/**
+ * Maximum additional wait we will introduce before emitting `done` just
+ * to capture a freshly-generated title. Because title generation runs in
+ * parallel with the assistant streaming response, the promise has almost
+ * always already resolved by the time we reach this await — the cap only
+ * bites if Haiku is degraded, in which case we'd rather emit `done` on
+ * time and leave the placeholder title in place than stall the user.
+ */
+const TITLE_GENERATION_GRACE_MS = 1500;
+
 async function finalize(
   messageId: string,
   conversationId: string,
@@ -1575,7 +1661,8 @@ async function finalize(
   encoder: TextEncoder,
   subConversationId?: string,
   pendingImages?: PendingImageMeta[],
-  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; textCredits?: TextCreditState; preChargedResult?: ChargeResult }
+  creditInfo?: { userId?: string; imageQuality?: string; wasImageGeneration?: boolean; textCredits?: TextCreditState; preChargedResult?: ChargeResult },
+  titleContext?: TitleContext
 ): Promise<void> {
   const log = logger.child({
     route: "chat",
@@ -1707,6 +1794,35 @@ async function finalize(
         type: "questions",
         data: { questions: result.meta.questions },
       });
+    }
+  }
+
+  // Emit the LLM-generated title (if any) before `done` so the sidebar and
+  // header can update in the same UI tick. Bounded wait: the main model was
+  // already streaming for seconds, so Haiku (~1s) has almost always resolved.
+  // Everything is guarded so a title failure cannot break the chat response.
+  if (titleContext) {
+    try {
+      const generatedTitle = await raceWithTimeout(
+        titleContext.titlePromise,
+        TITLE_GENERATION_GRACE_MS,
+      );
+      if (generatedTitle && generatedTitle !== titleContext.placeholderTitle) {
+        const updated = await updateConversationTitleIfUnchanged(
+          conversationId,
+          titleContext.placeholderTitle,
+          generatedTitle,
+          { requestId: titleContext.requestId },
+        );
+        if (updated) {
+          await sendSSE(writer, encoder, {
+            type: "title",
+            data: { conversationId, title: generatedTitle },
+          });
+        }
+      }
+    } catch (err) {
+      log.warn("Emitting generated title failed (non-critical)", {}, err);
     }
   }
 

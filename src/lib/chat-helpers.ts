@@ -102,12 +102,35 @@ function validateImages(raw: unknown): ImageAttachment[] | undefined {
   return images.length > 0 ? images : undefined;
 }
 
+/**
+ * Build the placeholder title that is written to the DB at the moment a
+ * new conversation is created. This keeps the sidebar's first paint fast
+ * and guarantees the row always has a non-empty title even if async
+ * LLM-based title generation fails later.
+ */
+function buildPlaceholderTitle(messagePreview: string): string {
+  const trimmed = messagePreview.trim();
+  if (trimmed.length <= 50) return trimmed;
+  return `${trimmed.slice(0, 50)}...`;
+}
+
+export interface ResolvedConversation {
+  id: string;
+  /** True when this call just inserted the row; false when the row already existed. */
+  isNew: boolean;
+  /**
+   * The placeholder title written at insert time. Empty string when the
+   * row already existed (callers only use this for newly created rows).
+   */
+  placeholderTitle: string;
+}
+
 export async function getOrCreateConversation(
   conversationId: string | undefined,
   messagePreview: string,
   projectId?: string,
   userId?: string
-): Promise<string> {
+): Promise<ResolvedConversation> {
   const supabase = getSupabase();
 
   if (conversationId) {
@@ -126,16 +149,16 @@ export async function getOrCreateConversation(
     if (error || !data) {
       throw new Error(`Conversation not found: ${conversationId}`);
     }
-    return conversationId;
+    return { id: conversationId, isNew: false, placeholderTitle: "" };
   }
 
   const id = randomUUID();
-  const title = messagePreview.slice(0, 50) + (messagePreview.length > 50 ? "..." : "");
+  const placeholderTitle = buildPlaceholderTitle(messagePreview);
   const now = new Date().toISOString();
 
   const row: Record<string, unknown> = {
     id,
-    title,
+    title: placeholderTitle,
     created_at: now,
     updated_at: now,
   };
@@ -154,7 +177,7 @@ export async function getOrCreateConversation(
     throw new Error(`Failed to create conversation: ${error.message}`);
   }
 
-  return id;
+  return { id, isNew: true, placeholderTitle };
 }
 
 export async function saveUserMessage(
