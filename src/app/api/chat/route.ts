@@ -5,6 +5,13 @@ import { getProvider, getAvailableProviders } from "@/lib/providers";
 import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
 import type { AravielMeta } from "@/lib/stream/meta-parser";
+import {
+  createTitleParseState,
+  feedTitleChunk,
+  flushTitleParser,
+  type TitleParseState,
+} from "@/lib/stream/title-parser";
+import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
 import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse, ConversationMessage, ImageAttachment } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
@@ -188,18 +195,23 @@ async function handleChat(
 
     // 2. Get or create conversation (for sub-conversations, validate and use the parent conversation)
     let conversationId: string;
+    let isNewConversation = false;
+    let placeholderTitle = "";
     const subConversationId = chatReq.subConversationId;
 
     if (subConversationId) {
       const subConv = await validateSubConversation(subConversationId);
       conversationId = subConv.conversationId;
     } else {
-      conversationId = await getOrCreateConversation(
+      const resolved = await getOrCreateConversation(
         chatReq.conversationId,
         chatReq.message,
         chatReq.projectId,
         user.id
       );
+      conversationId = resolved.id;
+      isNewConversation = resolved.isNew;
+      placeholderTitle = resolved.placeholderTitle;
     }
 
     // 3. Save user message first (must complete before fetching history)
@@ -404,7 +416,20 @@ async function handleChat(
     }
 
     const includeFileInstructions = detectFileIntent(chatReq.message);
-    let systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, { includeFileInstructions, userSettings });
+    // Only ask the model to emit an <araviel_title> block when this is a
+    // brand-new conversation with a real (non-sub) id. For text-mode chats on
+    // chat-capable models that stream naturally — skip for dedicated image
+    // generation since those models don't stream text.
+    const includeTitleInstructions =
+      isNewConversation &&
+      !subConversationId &&
+      chatReq.modality !== "image" &&
+      adeResponse.analysis.intent !== "image_generation";
+    let systemPrompt = buildSystemPrompt(projectInstructions ?? undefined, {
+      includeFileInstructions,
+      includeTitleInstructions,
+      userSettings,
+    });
 
     // Append deep research instructions when using a deep research model
     if (model.id === "o3-deep-research" || model.id === "o4-mini-deep-research") {
@@ -899,6 +924,15 @@ async function handleChat(
     }
 
     // Path B: Chat models (with optional native image gen)
+    // Only engage title interception when we asked the model to emit one.
+    const titleContext: TitleContext | undefined = includeTitleInstructions
+      ? {
+          conversationId,
+          placeholderTitle,
+          requestId: ctx.requestId,
+        }
+      : undefined;
+
     const streamResult = await streamFromProvider(
       model,
       systemPrompt,
@@ -913,7 +947,8 @@ async function handleChat(
       conversationId,
       messageId,
       pendingImages,
-      chatReq.images
+      chatReq.images,
+      titleContext
     );
 
     // 13. If primary failed, try backup
@@ -946,7 +981,8 @@ async function handleChat(
           conversationId,
           messageId,
           pendingImages,
-          chatReq.images
+          chatReq.images,
+          titleContext
         );
 
         if (!backupResult.success) {
@@ -1249,6 +1285,12 @@ async function tryDedicatedImageFallback(
   return null;
 }
 
+interface TitleContext {
+  conversationId: string;
+  placeholderTitle: string;
+  requestId?: string;
+}
+
 async function streamFromProvider(
   model: ModelInfo,
   systemPrompt: string,
@@ -1263,7 +1305,8 @@ async function streamFromProvider(
   conversationId?: string,
   messageId?: string,
   pendingImages?: PendingImageMeta[],
-  uploadedImages?: ImageAttachment[]
+  uploadedImages?: ImageAttachment[],
+  titleContext?: TitleContext
 ): Promise<StreamResult> {
   const log = logger.child({ route: "chat", subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
@@ -1317,10 +1360,44 @@ async function streamFromProvider(
       enableImageGeneration,
     });
 
+    // Streaming title parser — strips the leading <araviel_title>…</araviel_title>
+    // block from visible content and fires a `title` SSE event as soon as it's
+    // parsed. Only active on new conversations; null otherwise.
+    const titleParserState: TitleParseState | null = titleContext
+      ? createTitleParseState()
+      : null;
+
     // Tail buffer to prevent <araviel_meta> block from flashing in the UI.
     // We hold back content once we detect a potential partial meta tag.
     let tailBuffer = "";
     const META_OPEN = "<araviel_meta>";
+
+    /**
+     * Run a raw stream chunk through the title parser. Returns the portion of
+     * the chunk that is safe to append to the saved message content and to
+     * forward through the visible-delta pipeline. Fires the `title` SSE event
+     * exactly once when the closing tag arrives and the DB update succeeds.
+     */
+    async function extractTitleFromChunk(chunk: string): Promise<string> {
+      if (!titleParserState || titleParserState.resolved) return chunk;
+
+      const { title, deltaToEmit } = feedTitleChunk(titleParserState, chunk);
+      if (title !== null && titleContext) {
+        const updated = await updateConversationTitleIfUnchanged(
+          titleContext.conversationId,
+          titleContext.placeholderTitle,
+          title,
+          { requestId: titleContext.requestId }
+        );
+        if (updated) {
+          await sendSSE(writer, encoder, {
+            type: "title",
+            data: { conversationId: titleContext.conversationId, title },
+          });
+        }
+      }
+      return deltaToEmit;
+    }
 
     async function flushSafeDelta(chunk: string): Promise<void> {
       tailBuffer += chunk;
@@ -1368,8 +1445,11 @@ async function streamFromProvider(
       switch (event.type) {
         case "delta":
           if (event.content) {
-            content += event.content;
-            await flushSafeDelta(event.content);
+            const visibleChunk = await extractTitleFromChunk(event.content);
+            if (visibleChunk) {
+              content += visibleChunk;
+              await flushSafeDelta(visibleChunk);
+            }
           }
           break;
         case "thinking":
@@ -1458,6 +1538,16 @@ async function streamFromProvider(
           break;
         case "error":
           throw new Error(event.error ?? "Provider stream error");
+      }
+    }
+
+    // If the title parser is still holding unresolved content (model never closed
+    // the tag or didn't emit one at all), flush it as ordinary visible content.
+    if (titleParserState && !titleParserState.resolved) {
+      const leftover = flushTitleParser(titleParserState);
+      if (leftover) {
+        content += leftover;
+        await flushSafeDelta(leftover);
       }
     }
 
