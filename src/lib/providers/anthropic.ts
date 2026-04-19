@@ -82,7 +82,15 @@ export class AnthropicProvider implements AIProvider {
       ...(tools.length > 0 ? { tools } : {}),
       ...(useThinking
         ? ADAPTIVE_THINKING_MODELS.has(config.modelId)
-          ? { thinking: { type: "adaptive" as const } }
+          ? {
+              // Opus 4.7 defaults thinking.display to "omitted"; request
+              // "summarized" so thinking_delta events carry visible content.
+              // No-op on Opus 4.6 and Sonnet 4.6 where "summarized" is the default.
+              thinking: {
+                type: "adaptive",
+                display: "summarized",
+              } as unknown as Anthropic.MessageCreateParamsStreaming["thinking"],
+            }
           : { thinking: { type: "enabled" as const, budget_tokens: 10000 } }
         : {}),
     };
