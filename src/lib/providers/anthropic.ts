@@ -3,14 +3,20 @@ import type { AIProvider, ProviderConfig, ProviderStreamEvent } from "./base";
 import type { Citation, ConversationMessage, TokenUsage } from "@/lib/types";
 
 const THINKING_MODELS = new Set([
+  "claude-opus-4-7",
   "claude-sonnet-4-6",
   "claude-sonnet-4-5-20250929",
   "claude-opus-4-6",
   "claude-opus-4-5-20251101",
 ]);
 
-/** Models that support adaptive thinking (recommended over manual budget_tokens). */
+/**
+ * Models that support adaptive thinking (recommended over manual budget_tokens).
+ * For Claude Opus 4.7 adaptive thinking is the only supported thinking mode —
+ * passing `thinking: { type: "enabled", budget_tokens: N }` returns a 400 error.
+ */
 const ADAPTIVE_THINKING_MODELS = new Set([
+  "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
 ]);

@@ -25,6 +25,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "o4-mini-deep-research": { inputPerMillion: 2, outputPerMillion: 8 },
 
   // Anthropic
+  "claude-opus-4-7": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-6": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-5-20251101": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-20250514": { inputPerMillion: 15, outputPerMillion: 75 },
