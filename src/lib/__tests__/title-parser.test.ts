@@ -4,6 +4,8 @@ import {
   createTitleParseState,
   feedTitleChunk,
   flushTitleParser,
+  extractAravielTitle,
+  containsPartialTitle,
   TITLE_MAX_CHARS,
 } from "@/lib/stream/title-parser";
 
@@ -174,5 +176,84 @@ describe("title stream parser", () => {
     );
     expect(title).toBeNull();
     expect(deltaToEmit).toBe("<araviel_title>Late</araviel_title>tail");
+  });
+});
+
+describe("extractAravielTitle", () => {
+  it("returns the content unchanged when no title tag is present", () => {
+    const { cleanContent, title } = extractAravielTitle("Just a plain answer.");
+    expect(cleanContent).toBe("Just a plain answer.");
+    expect(title).toBeNull();
+  });
+
+  it("strips a trailing title block and returns the sanitized title", () => {
+    const content =
+      "Here's your detailed answer.\n\n<araviel_title>Isle of Wight trip budget review</araviel_title>";
+    const { cleanContent, title } = extractAravielTitle(content);
+    expect(title).toBe("Isle of Wight trip budget review");
+    expect(cleanContent).toBe("Here's your detailed answer.");
+    expect(cleanContent).not.toContain("<araviel_title>");
+    expect(cleanContent).not.toContain("</araviel_title>");
+  });
+
+  it("strips a leading title block", () => {
+    const { cleanContent, title } = extractAravielTitle(
+      "<araviel_title>Quick hello</araviel_title>\nHello there!",
+    );
+    expect(title).toBe("Quick hello");
+    expect(cleanContent).toBe("Hello there!");
+  });
+
+  it("strips a mid-content title block and preserves surrounding text", () => {
+    const { cleanContent, title } = extractAravielTitle(
+      "Before.\n<araviel_title>Middle</araviel_title>\nAfter.",
+    );
+    expect(title).toBe("Middle");
+    expect(cleanContent).toBe("Before.\nAfter.");
+  });
+
+  it("strips multiple title blocks and returns the first sanitized one", () => {
+    const { cleanContent, title } = extractAravielTitle(
+      "A <araviel_title>First title</araviel_title> B <araviel_title>Second title</araviel_title> C",
+    );
+    expect(title).toBe("First title");
+    expect(cleanContent).toBe("A  B  C");
+  });
+
+  it("leaves unterminated tags alone (caller will flush them verbatim)", () => {
+    const content = "Answer.\n<araviel_title>Never closed";
+    const { cleanContent, title } = extractAravielTitle(content);
+    expect(title).toBeNull();
+    expect(cleanContent).toBe(content.trimEnd());
+  });
+
+  it("returns null title when the block body is empty", () => {
+    const { cleanContent, title } = extractAravielTitle(
+      "Hi<araviel_title></araviel_title> there",
+    );
+    expect(title).toBeNull();
+    expect(cleanContent).toBe("Hi there");
+  });
+});
+
+describe("containsPartialTitle", () => {
+  it("flags an open tag without a close", () => {
+    expect(containsPartialTitle("prefix <araviel_title>Incomp")).toBe(true);
+  });
+
+  it("flags a tail that could still grow into the open tag", () => {
+    expect(containsPartialTitle("text <arav")).toBe(true);
+    expect(containsPartialTitle("text <a")).toBe(true);
+  });
+
+  it("does not flag content with a complete title block", () => {
+    expect(
+      containsPartialTitle("pre <araviel_title>Done</araviel_title> post"),
+    ).toBe(false);
+  });
+
+  it("does not flag unrelated content", () => {
+    expect(containsPartialTitle("Just a sentence.")).toBe(false);
+    expect(containsPartialTitle("Some <other> tag")).toBe(false);
   });
 });
