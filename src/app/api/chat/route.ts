@@ -9,6 +9,9 @@ import {
   createTitleParseState,
   feedTitleChunk,
   flushTitleParser,
+  extractAravielTitle,
+  containsPartialTitle,
+  sanitizeTitle,
   type TitleParseState,
 } from "@/lib/stream/title-parser";
 import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
@@ -1372,60 +1375,97 @@ async function streamFromProvider(
     // We hold back content once we detect a potential partial meta tag.
     let tailBuffer = "";
     const META_OPEN = "<araviel_meta>";
+    const TITLE_OPEN = "<araviel_title>";
+    const TITLE_CLOSE = "</araviel_title>";
+
+    // Tracks whether we've already fired the `title` SSE event so late-arriving
+    // title blocks (e.g. model emitted at the END of the response) don't
+    // trigger a duplicate update.
+    let titleEmitted = false;
+
+    async function emitTitleIfNew(title: string): Promise<void> {
+      if (titleEmitted || !titleContext) return;
+      const updated = await updateConversationTitleIfUnchanged(
+        titleContext.conversationId,
+        titleContext.placeholderTitle,
+        title,
+        { requestId: titleContext.requestId }
+      );
+      if (updated) {
+        titleEmitted = true;
+        await sendSSE(writer, encoder, {
+          type: "title",
+          data: { conversationId: titleContext.conversationId, title },
+        });
+      }
+    }
 
     /**
-     * Run a raw stream chunk through the title parser. Returns the portion of
-     * the chunk that is safe to append to the saved message content and to
-     * forward through the visible-delta pipeline. Fires the `title` SSE event
-     * exactly once when the closing tag arrives and the DB update succeeds.
+     * Run a raw stream chunk through the streaming title parser. This fast path
+     * only matches titles emitted at the very start of the response; tags that
+     * arrive later are handled by `flushSafeDelta` so the content never flashes
+     * visibly in the UI.
      */
     async function extractTitleFromChunk(chunk: string): Promise<string> {
       if (!titleParserState || titleParserState.resolved) return chunk;
 
       const { title, deltaToEmit } = feedTitleChunk(titleParserState, chunk);
-      if (title !== null && titleContext) {
-        const updated = await updateConversationTitleIfUnchanged(
-          titleContext.conversationId,
-          titleContext.placeholderTitle,
-          title,
-          { requestId: titleContext.requestId }
-        );
-        if (updated) {
-          await sendSSE(writer, encoder, {
-            type: "title",
-            data: { conversationId: titleContext.conversationId, title },
-          });
-        }
+      if (title !== null) {
+        await emitTitleIfNew(title);
       }
       return deltaToEmit;
+    }
+
+    /**
+     * Splice out any complete `<araviel_title>…</araviel_title>` blocks from
+     * `tailBuffer`, firing the `title` SSE event (once) for the first one we
+     * successfully sanitize. Leaves incomplete tags in place so they can
+     * continue buffering. Runs even when no title was requested so stray tags
+     * from model hallucinations never leak to the client.
+     */
+    async function absorbBufferedTitle(): Promise<void> {
+      while (true) {
+        const openIdx = tailBuffer.indexOf(TITLE_OPEN);
+        if (openIdx === -1) return;
+        const closeIdx = tailBuffer.indexOf(TITLE_CLOSE, openIdx + TITLE_OPEN.length);
+        if (closeIdx === -1) return; // wait for the rest
+
+        const raw = tailBuffer.slice(openIdx + TITLE_OPEN.length, closeIdx);
+        let after = closeIdx + TITLE_CLOSE.length;
+        // Swallow one surrounding newline pair so stripped blocks don't leave
+        // an awkward blank line in the delta stream.
+        const before = tailBuffer.slice(0, openIdx);
+        if (/\n\s*$/.test(before) && tailBuffer[after] === "\n") {
+          after += 1;
+        }
+        tailBuffer = tailBuffer.slice(0, openIdx) + tailBuffer.slice(after);
+
+        const sanitized = sanitizeTitle(raw);
+        if (sanitized) {
+          await emitTitleIfNew(sanitized);
+        }
+      }
     }
 
     async function flushSafeDelta(chunk: string): Promise<void> {
       tailBuffer += chunk;
 
-      // Once we see the start of the meta block, hold everything from that point
+      // Strip any complete title blocks anywhere in the buffer before further
+      // processing so their bytes never reach the client.
+      await absorbBufferedTitle();
+
+      // Once we see the start of the meta block, hold everything from that point.
+      // If an incomplete title block is also present, hold from whichever comes first.
       const metaIdx = tailBuffer.indexOf(META_OPEN);
-      if (metaIdx !== -1) {
-        // Flush everything before the meta tag, hold the rest
-        const safe = tailBuffer.slice(0, metaIdx);
-        tailBuffer = tailBuffer.slice(metaIdx);
-        if (safe) {
-          await sendSSE(writer, encoder, { type: "delta", data: { content: safe } });
-        }
-        return;
+      const titleIdx = tailBuffer.indexOf(TITLE_OPEN);
+
+      let holdFrom = -1;
+      if (metaIdx !== -1) holdFrom = metaIdx;
+      if (titleIdx !== -1 && (holdFrom === -1 || titleIdx < holdFrom)) {
+        holdFrom = titleIdx;
       }
 
-      // Check if the tail might be a partial opening tag
-      if (containsPartialMeta(tailBuffer)) {
-        // Find the longest suffix that could be a partial match
-        let holdFrom = tailBuffer.length;
-        for (let i = 1; i <= META_OPEN.length && i <= tailBuffer.length; i++) {
-          const suffix = tailBuffer.slice(-i);
-          if (META_OPEN.startsWith(suffix)) {
-            holdFrom = tailBuffer.length - i;
-            break;
-          }
-        }
+      if (holdFrom !== -1) {
         const safe = tailBuffer.slice(0, holdFrom);
         tailBuffer = tailBuffer.slice(holdFrom);
         if (safe) {
@@ -1434,7 +1474,30 @@ async function streamFromProvider(
         return;
       }
 
-      // No meta risk — flush everything
+      // Check if the tail might be a partial opening tag for either block
+      const partialMeta = containsPartialMeta(tailBuffer);
+      const partialTitle = containsPartialTitle(tailBuffer);
+      if (partialMeta || partialTitle) {
+        let holdFromSuffix = tailBuffer.length;
+        const candidates = [META_OPEN, TITLE_OPEN];
+        for (const tag of candidates) {
+          for (let i = 1; i <= tag.length && i <= tailBuffer.length; i++) {
+            const suffix = tailBuffer.slice(-i);
+            if (tag.startsWith(suffix)) {
+              holdFromSuffix = Math.min(holdFromSuffix, tailBuffer.length - i);
+              break;
+            }
+          }
+        }
+        const safe = tailBuffer.slice(0, holdFromSuffix);
+        tailBuffer = tailBuffer.slice(holdFromSuffix);
+        if (safe) {
+          await sendSSE(writer, encoder, { type: "delta", data: { content: safe } });
+        }
+        return;
+      }
+
+      // No tag risk — flush everything
       const toSend = tailBuffer;
       tailBuffer = "";
       if (toSend) {
@@ -1561,14 +1624,34 @@ async function streamFromProvider(
       }
     }
 
+    // Belt-and-suspenders pass: strip any `<araviel_title>` block still lurking
+    // in the accumulated content (e.g. model emitted the tag at the end of the
+    // response instead of the start). Fires the `title` SSE once if the
+    // streaming pipeline didn't already catch it.
+    {
+      const { cleanContent: titleStripped, title: lateTitle } =
+        extractAravielTitle(content);
+      if (titleStripped !== content) {
+        content = titleStripped;
+      }
+      if (lateTitle) {
+        await emitTitleIfNew(lateTitle);
+      }
+    }
+
     // If there's any remaining tail buffer that wasn't part of the meta block, flush it.
     // (This handles the case where the AI didn't produce a meta block at all.)
     const { cleanContent, meta } = extractAravielMeta(content);
 
-    // Flush any buffered non-meta content that wasn't sent during streaming
-    // The tailBuffer may contain the meta block or leftover content
+    // Flush any buffered non-meta content that wasn't sent during streaming.
+    // Strip any stray (unclosed or otherwise) title markup so it can never reach
+    // the client — the final saved `content` is already cleaned above.
     if (tailBuffer && !tailBuffer.includes(META_OPEN)) {
-      await sendSSE(writer, encoder, { type: "delta", data: { content: tailBuffer } });
+      const { cleanContent: safeTail } = extractAravielTitle(tailBuffer);
+      const sanitizedTail = safeTail.replace(TITLE_OPEN, "").replace(TITLE_CLOSE, "");
+      if (sanitizedTail) {
+        await sendSSE(writer, encoder, { type: "delta", data: { content: sanitizedTail } });
+      }
     }
 
     const latencyMs = Date.now() - start;

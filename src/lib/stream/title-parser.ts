@@ -119,6 +119,90 @@ function couldBeTitlePrefix(text: string): boolean {
 }
 
 /**
+ * Fallback extractor for `<araviel_title>…</araviel_title>` blocks that arrive
+ * anywhere in the accumulated response — not just at the leading edge. Models
+ * occasionally forget the "output the title first" instruction and emit the
+ * block at the end of the response; this function strips every occurrence and
+ * returns the first successfully sanitized title.
+ *
+ * Mirrors {@link extractAravielMeta} from `meta-parser.ts`.
+ */
+export function extractAravielTitle(content: string): {
+  cleanContent: string;
+  title: string | null;
+} {
+  if (!content || !content.includes(TITLE_OPEN)) {
+    return { cleanContent: content, title: null };
+  }
+
+  let cleaned = "";
+  let cursor = 0;
+  let title: string | null = null;
+  let strippedAtStart = false;
+
+  while (cursor < content.length) {
+    const openIdx = content.indexOf(TITLE_OPEN, cursor);
+    if (openIdx === -1) {
+      cleaned += content.slice(cursor);
+      break;
+    }
+    const closeIdx = content.indexOf(TITLE_CLOSE, openIdx + TITLE_OPEN.length);
+    if (closeIdx === -1) {
+      // Unterminated tag — leave the remainder untouched so the original flush
+      // path can surface it verbatim rather than silently eating content.
+      cleaned += content.slice(cursor);
+      break;
+    }
+
+    // Preserve text before the tag, trimming a single surrounding blank line
+    // so stripped blocks don't leave odd gaps.
+    let prefix = content.slice(cursor, openIdx);
+    let suffixStart = closeIdx + TITLE_CLOSE.length;
+
+    // If the block sits on its own line, absorb one trailing newline to avoid
+    // leaving a dangling blank line in the visible content.
+    if (/\n\s*$/.test(prefix) && content[suffixStart] === "\n") {
+      suffixStart += 1;
+    } else if (prefix.endsWith("\n\n")) {
+      prefix = prefix.slice(0, -1);
+    }
+
+    if (cursor === 0 && prefix.trim().length === 0) {
+      // Block sits at the very beginning — drop any leading whitespace so the
+      // cleaned output doesn't start with a phantom blank line.
+      strippedAtStart = true;
+      prefix = "";
+    }
+
+    cleaned += prefix;
+    if (title === null) {
+      const raw = content.slice(openIdx + TITLE_OPEN.length, closeIdx);
+      title = sanitizeTitle(raw);
+    }
+    cursor = suffixStart;
+  }
+
+  let result = cleaned.trimEnd();
+  if (strippedAtStart) {
+    result = result.replace(/^\s+/, "");
+  }
+  return { cleanContent: result, title };
+}
+
+/**
+ * Does `text` contain a partial `<araviel_title>` tag that could still complete
+ * as more content streams in? Used by the delta flusher to hold back in-flight
+ * tag characters so they never flash visibly.
+ */
+export function containsPartialTitle(text: string): boolean {
+  if (text.includes(TITLE_OPEN) && !text.includes(TITLE_CLOSE)) return true;
+  for (let i = 1; i <= TITLE_OPEN.length && i <= text.length; i++) {
+    if (TITLE_OPEN.startsWith(text.slice(-i))) return true;
+  }
+  return false;
+}
+
+/**
  * Clean a raw model-produced title: strip wrapping punctuation, collapse
  * whitespace, drop markdown emphasis, cap at {@link TITLE_MAX_CHARS} at a word
  * boundary. Returns `null` for anything too short or unusable.
