@@ -12,6 +12,7 @@ import {
   type TitleParseState,
 } from "@/lib/stream/title-parser";
 import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
+import { dedupeCitations } from "@/lib/citations";
 import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse, ConversationMessage, ImageAttachment } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
@@ -1463,11 +1464,20 @@ async function streamFromProvider(
           break;
         case "citations":
           if (event.citations) {
-            citations.push(...event.citations);
+            // Providers often accumulate the same citations list across every
+            // streamed chunk (e.g. Perplexity, Gemini), so the array we receive
+            // here can contain massive duplicate counts. Dedupe by normalized
+            // URL before storing and before emitting to the client.
+            const uniqueCitations = dedupeCitations([
+              ...citations,
+              ...event.citations,
+            ]);
+            citations.length = 0;
+            citations.push(...uniqueCitations);
             await sendSSE(writer, encoder, {
               type: "citations",
               data: {
-                sources: event.citations.map((c) => ({
+                sources: uniqueCitations.map((c) => ({
                   url: c.url,
                   title: c.title,
                   snippet: c.snippet ?? "",
