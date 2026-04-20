@@ -102,12 +102,25 @@ function validateImages(raw: unknown): ImageAttachment[] | undefined {
   return images.length > 0 ? images : undefined;
 }
 
+export interface ResolvedConversation {
+  id: string;
+  /** True when this call inserted a brand-new row; false when the id was provided. */
+  isNew: boolean;
+  /** The placeholder title written at insert time. Empty when the row pre-existed. */
+  placeholderTitle: string;
+}
+
+/** Build the truncated placeholder title used on initial insert. */
+function buildPlaceholderTitle(messagePreview: string): string {
+  return messagePreview.slice(0, 50) + (messagePreview.length > 50 ? "..." : "");
+}
+
 export async function getOrCreateConversation(
   conversationId: string | undefined,
   messagePreview: string,
   projectId?: string,
   userId?: string
-): Promise<string> {
+): Promise<ResolvedConversation> {
   const supabase = getSupabase();
 
   if (conversationId) {
@@ -126,16 +139,16 @@ export async function getOrCreateConversation(
     if (error || !data) {
       throw new Error(`Conversation not found: ${conversationId}`);
     }
-    return conversationId;
+    return { id: conversationId, isNew: false, placeholderTitle: "" };
   }
 
   const id = randomUUID();
-  const title = messagePreview.slice(0, 50) + (messagePreview.length > 50 ? "..." : "");
+  const placeholderTitle = buildPlaceholderTitle(messagePreview);
   const now = new Date().toISOString();
 
   const row: Record<string, unknown> = {
     id,
-    title,
+    title: placeholderTitle,
     created_at: now,
     updated_at: now,
   };
@@ -154,7 +167,7 @@ export async function getOrCreateConversation(
     throw new Error(`Failed to create conversation: ${error.message}`);
   }
 
-  return id;
+  return { id, isNew: true, placeholderTitle };
 }
 
 export async function saveUserMessage(
@@ -615,6 +628,7 @@ export function buildSystemPrompt(
   projectInstructions?: string,
   options?: {
     includeFileInstructions?: boolean;
+    includeTitleInstructions?: boolean;
     userSettings?: UserSettingsForPrompt | null;
   }
 ): string {
@@ -633,6 +647,13 @@ export function buildSystemPrompt(
 
   if (options?.includeFileInstructions) {
     prompt += `\n\n${getFileBlockInstructions()}`;
+  }
+
+  if (options?.includeTitleInstructions) {
+    // Prepended via concatenation so this block is the first thing the model
+    // generates on a brand-new conversation. The `<araviel_title>…</araviel_title>`
+    // block is parsed and stripped server-side — the user never sees it.
+    prompt = `${getTitleInstructions()}\n\n${prompt}`;
   }
 
   prompt += `\n\n${getFollowUpInstructions()}`;
@@ -991,6 +1012,21 @@ For JSON format, "content" can be an object/array and will be pretty-printed:
 7. You can include multiple file blocks in one response if the user asks for multiple formats.
 8. Common triggers: "download as...", "export to...", "give me a PDF of...", "create a spreadsheet with...", "save this as...", "generate a file...", "I need a Word doc...".
 9. If the user asks for a format not in the supported list, use the closest match (e.g., .doc → docx, .xls → xlsx) and mention it.`;
+}
+
+function getTitleInstructions(): string {
+  return `--- Conversation Title ---
+This is the very first message in a brand-new conversation. Before anything else, emit a concise, human-readable title for this conversation. The title will be parsed out and stripped from the visible response — the user will never see this block.
+
+Format:
+<araviel_title>Your title here</araviel_title>
+
+Rules:
+1. The title must be 3 to 7 words, in sentence case (capitalize the first word and proper nouns only).
+2. Be specific to the user's actual topic (e.g. "Diagnosing pytest Docker OOM"), not generic like "Help with code" or "User question".
+3. No trailing punctuation, no quotes, no markdown, no emoji.
+4. Output the <araviel_title> block FIRST, before any other content. Then continue with your normal response immediately after the closing tag.
+5. Do NOT mention or reference the title block in your visible response.`;
 }
 
 function getFollowUpInstructions(): string {

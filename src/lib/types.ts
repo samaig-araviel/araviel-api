@@ -146,6 +146,7 @@ export type SSEEventType =
   | "research_status"
   | "followups"
   | "questions"
+  | "title"
   | "done"
   | "error";
 
