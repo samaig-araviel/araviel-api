@@ -6,13 +6,8 @@ import { createSSEStream, sendSSE } from "@/lib/stream/normalizer";
 import { extractAravielMeta, containsPartialMeta } from "@/lib/stream/meta-parser";
 import type { AravielMeta } from "@/lib/stream/meta-parser";
 import {
-  createTitleParseState,
-  feedTitleChunk,
-  flushTitleParser,
   extractAravielTitle,
   containsPartialTitle,
-  sanitizeTitle,
-  type TitleParseState,
 } from "@/lib/stream/title-parser";
 import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
 import { dedupeCitations } from "@/lib/citations";
@@ -1364,27 +1359,19 @@ async function streamFromProvider(
       enableImageGeneration,
     });
 
-    // Streaming title parser — strips the leading <araviel_title>…</araviel_title>
-    // block from visible content and fires a `title` SSE event as soon as it's
-    // parsed. Only active on new conversations; null otherwise.
-    const titleParserState: TitleParseState | null = titleContext
-      ? createTitleParseState()
-      : null;
-
-    // Tail buffer to prevent <araviel_meta> block from flashing in the UI.
-    // We hold back content once we detect a potential partial meta tag.
+    // Tail buffer to prevent <araviel_meta> and <araviel_title> blocks from
+    // flashing in the UI. We hold back content once we detect a potential
+    // partial tag for either block.
     let tailBuffer = "";
     const META_OPEN = "<araviel_meta>";
     const TITLE_OPEN = "<araviel_title>";
     const TITLE_CLOSE = "</araviel_title>";
 
-    // Tracks whether we've already fired the `title` SSE event so late-arriving
-    // title blocks (e.g. model emitted at the END of the response) don't
-    // trigger a duplicate update.
-    let titleEmitted = false;
-
-    async function emitTitleIfNew(title: string): Promise<void> {
-      if (titleEmitted || !titleContext) return;
+    // Title SSE fires exactly once — post-stream — after the full response is
+    // in hand. This avoids mid-stream race conditions and ensures the title is
+    // only surfaced when we know the generation succeeded.
+    async function emitTitle(title: string): Promise<void> {
+      if (!titleContext) return;
       const updated = await updateConversationTitleIfUnchanged(
         titleContext.conversationId,
         titleContext.placeholderTitle,
@@ -1392,7 +1379,6 @@ async function streamFromProvider(
         { requestId: titleContext.requestId }
       );
       if (updated) {
-        titleEmitted = true;
         await sendSSE(writer, encoder, {
           type: "title",
           data: { conversationId: titleContext.conversationId, title },
@@ -1401,36 +1387,18 @@ async function streamFromProvider(
     }
 
     /**
-     * Run a raw stream chunk through the streaming title parser. This fast path
-     * only matches titles emitted at the very start of the response; tags that
-     * arrive later are handled by `flushSafeDelta` so the content never flashes
-     * visibly in the UI.
-     */
-    async function extractTitleFromChunk(chunk: string): Promise<string> {
-      if (!titleParserState || titleParserState.resolved) return chunk;
-
-      const { title, deltaToEmit } = feedTitleChunk(titleParserState, chunk);
-      if (title !== null) {
-        await emitTitleIfNew(title);
-      }
-      return deltaToEmit;
-    }
-
-    /**
      * Splice out any complete `<araviel_title>…</araviel_title>` blocks from
-     * `tailBuffer`, firing the `title` SSE event (once) for the first one we
-     * successfully sanitize. Leaves incomplete tags in place so they can
-     * continue buffering. Runs even when no title was requested so stray tags
-     * from model hallucinations never leak to the client.
+     * `tailBuffer` silently — the title SSE is deferred to post-stream so we
+     * only strip bytes here to keep them from leaking to the client. Leaves
+     * incomplete tags in place so they can continue buffering.
      */
-    async function absorbBufferedTitle(): Promise<void> {
+    function absorbBufferedTitle(): void {
       while (true) {
         const openIdx = tailBuffer.indexOf(TITLE_OPEN);
         if (openIdx === -1) return;
         const closeIdx = tailBuffer.indexOf(TITLE_CLOSE, openIdx + TITLE_OPEN.length);
         if (closeIdx === -1) return; // wait for the rest
 
-        const raw = tailBuffer.slice(openIdx + TITLE_OPEN.length, closeIdx);
         let after = closeIdx + TITLE_CLOSE.length;
         // Swallow one surrounding newline pair so stripped blocks don't leave
         // an awkward blank line in the delta stream.
@@ -1439,11 +1407,6 @@ async function streamFromProvider(
           after += 1;
         }
         tailBuffer = tailBuffer.slice(0, openIdx) + tailBuffer.slice(after);
-
-        const sanitized = sanitizeTitle(raw);
-        if (sanitized) {
-          await emitTitleIfNew(sanitized);
-        }
       }
     }
 
@@ -1451,8 +1414,9 @@ async function streamFromProvider(
       tailBuffer += chunk;
 
       // Strip any complete title blocks anywhere in the buffer before further
-      // processing so their bytes never reach the client.
-      await absorbBufferedTitle();
+      // processing so their bytes never reach the client. The SSE fire itself
+      // is deferred to the post-stream pass for stability.
+      absorbBufferedTitle();
 
       // Once we see the start of the meta block, hold everything from that point.
       // If an incomplete title block is also present, hold from whichever comes first.
@@ -1509,11 +1473,8 @@ async function streamFromProvider(
       switch (event.type) {
         case "delta":
           if (event.content) {
-            const visibleChunk = await extractTitleFromChunk(event.content);
-            if (visibleChunk) {
-              content += visibleChunk;
-              await flushSafeDelta(visibleChunk);
-            }
+            content += event.content;
+            await flushSafeDelta(event.content);
           }
           break;
         case "thinking":
@@ -1614,28 +1575,19 @@ async function streamFromProvider(
       }
     }
 
-    // If the title parser is still holding unresolved content (model never closed
-    // the tag or didn't emit one at all), flush it as ordinary visible content.
-    if (titleParserState && !titleParserState.resolved) {
-      const leftover = flushTitleParser(titleParserState);
-      if (leftover) {
-        content += leftover;
-        await flushSafeDelta(leftover);
-      }
-    }
-
-    // Belt-and-suspenders pass: strip any `<araviel_title>` block still lurking
-    // in the accumulated content (e.g. model emitted the tag at the end of the
-    // response instead of the start). Fires the `title` SSE once if the
-    // streaming pipeline didn't already catch it.
+    // Post-stream title pass: extract any `<araviel_title>` block from the full
+    // accumulated content and fire the `title` SSE exactly once. Keeping this
+    // as the single authoritative emit path makes the flow deterministic —
+    // whether the model emitted the tag at the start, middle, or end of the
+    // response, we only surface the title once the generation has succeeded.
     {
-      const { cleanContent: titleStripped, title: lateTitle } =
+      const { cleanContent: titleStripped, title: finalTitle } =
         extractAravielTitle(content);
       if (titleStripped !== content) {
         content = titleStripped;
       }
-      if (lateTitle) {
-        await emitTitleIfNew(lateTitle);
+      if (finalTitle) {
+        await emitTitle(finalTitle);
       }
     }
 
