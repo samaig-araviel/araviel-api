@@ -1,7 +1,14 @@
 import type { ADEResponse } from "@/lib/types";
+import {
+  getAdeCallerSecret,
+  getAdeToken,
+  invalidateAdeToken,
+} from "./ade-auth";
 import { logger } from "./logger";
 
 const log = logger.child({ module: "ade" });
+
+const ADE_CALLER_AUTH_HEADER = "X-ADE-Caller-Auth";
 
 interface ADERequestContext {
   conversationId?: string;
@@ -40,13 +47,34 @@ async function fetchADEOnce(
   body: Record<string, unknown>,
   signal?: AbortSignal
 ): Promise<Response> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  return res;
+  const callerSecret = await getAdeCallerSecret();
+
+  const buildRequest = (token: string) =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        [ADE_CALLER_AUTH_HEADER]: callerSecret,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+  const initialToken = await getAdeToken();
+  const firstResponse = await buildRequest(initialToken);
+
+  // A 401 from ADE means the token was rejected — most commonly because
+  // ADE rotated its verification key while we were holding a cached token
+  // signed with the previous one. Drop the cache, mint fresh, retry once.
+  if (firstResponse.status !== 401) {
+    return firstResponse;
+  }
+
+  log.warn("ADE rejected cached token; refreshing and retrying once");
+  invalidateAdeToken();
+  const freshToken = await getAdeToken(true);
+  return buildRequest(freshToken);
 }
 
 export async function callADE(request: ADERequest): Promise<ADECallResult> {
