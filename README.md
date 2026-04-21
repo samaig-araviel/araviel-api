@@ -1,322 +1,139 @@
 # Araviel API
 
-Backend for Araviel, an AI orchestration platform that routes user queries to the optimal AI model. Built with Next.js, TypeScript, and Supabase.
+Backend for Araviel, an AI orchestration platform that routes each message to the optimal model and streams the response back to the client.
+
+---
 
 ## Overview
 
-Araviel replaces multiple AI subscriptions with a single intelligent interface. When a user sends a message, the backend:
+When a client sends a chat message, the API:
 
-1. Calls the **Araviel Decision Engine (ADE)** to determine the best AI model for that query
-2. Routes the request to the selected provider (OpenAI, Anthropic, Google, or Perplexity)
-3. Streams the response back via **Server-Sent Events (SSE)**
-
-```
-Client -> POST /api/chat -> ADE (routing) -> AI Provider (stream) -> SSE -> Client
-```
-
-## Architecture
+1. Asks the **Araviel Decision Engine (ADE)** which model fits the query best
+2. Calls the selected provider (OpenAI, Anthropic, Google, or Perplexity)
+3. Streams tokens back to the client over **Server-Sent Events**
+4. Persists the conversation and usage metadata in Supabase
 
 ```
-src/
-  app/
-    api/
-      chat/route.ts               # Main streaming chat endpoint
-      conversations/
-        route.ts                   # List and create conversations
-        [id]/
-          route.ts                 # Get single conversation
-          messages/
-            route.ts               # Get messages for a conversation
-            [messageId]/
-              sub-conversations/
-                route.ts           # Create and list sub-conversations for a message
-      sub-conversations/
-        [subId]/
-          messages/route.ts        # Get messages for a sub-conversation
-      health/route.ts              # Health check
-      cors.ts                      # CORS configuration
-  lib/
-    supabase.ts                    # Supabase client
-    ade.ts                         # ADE client
-    cost.ts                        # Token cost calculator
-    chat-helpers.ts                # Chat endpoint helper functions
-    types.ts                       # Shared TypeScript types
-    providers/
-      base.ts                      # Provider interface
-      index.ts                     # Provider registry
-      openai.ts                    # OpenAI (Responses API)
-      anthropic.ts                 # Anthropic (Messages API)
-      gemini.ts                    # Google Gemini (GenAI SDK)
-      perplexity.ts                # Perplexity (OpenAI-compatible)
-    stream/
-      normalizer.ts                # SSE stream utilities
-  config/
-    models.ts                      # Model pricing configuration
+Client ──▶ /api/chat ──▶ ADE (route) ──▶ Provider (stream) ──▶ SSE ──▶ Client
+                                                │
+                                                └──▶ Supabase (persist)
 ```
+
+---
 
 ## Tech Stack
 
-- **Runtime**: Next.js 16 (App Router)
-- **Language**: TypeScript (strict mode)
+- **Framework**: Next.js 16 (App Router)
+- **Language**: TypeScript (strict)
 - **Database**: Supabase (Postgres)
-- **AI Providers**: OpenAI, Anthropic, Google Gemini, Perplexity
+- **Providers**: OpenAI, Anthropic, Google Gemini, Perplexity
+- **Billing**: Stripe (subscriptions and credit packs)
 - **Deployment**: Vercel
 
-## Prerequisites
-
-- Node.js 18+
-- npm
-- A Supabase project with the required tables (see Database section)
-- API keys for the AI providers you want to use
+---
 
 ## Setup
 
-1. Clone the repository:
+### Prerequisites
+
+- Node.js 18+
+- npm
+- A Supabase project (see `src/migrations/` for the schema)
+- API credentials for the providers you want to enable
+
+### Install
 
 ```bash
 git clone <repository-url>
 cd araviel-api
-```
-
-2. Install dependencies:
-
-```bash
 npm install
 ```
 
-3. Create a `.env` file in the project root:
+### Environment
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-ADE_BASE_URL=https://ade-sandy.vercel.app
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key
-GOOGLE_API_KEY=your_google_key
-PERPLEXITY_API_KEY=your_perplexity_key
-```
+Create a `.env` file with the variables needed for your deployment. Obtain the values from your team — never commit them.
 
-4. Start the development server:
+Required categories:
 
-```bash
-npm run dev
-```
+- **Supabase**: project URL and service role key
+- **ADE**: base URL of your ADE deployment
+- **Providers**: credentials for OpenAI, Anthropic, Google, and/or Perplexity
+- **Stripe** _(optional)_: keys and webhook secret if billing is enabled
 
-The API will be available at `http://localhost:3000`.
-
-## Database Schema
-
-Five tables are required in Supabase. Create them before running the API.
-
-### conversations
-
-| Column     | Type        | Description          |
-| ---------- | ----------- | -------------------- |
-| id         | text (PK)   | UUID                 |
-| title      | text        | Conversation title   |
-| created_at | timestamptz | Creation timestamp   |
-| updated_at | timestamptz | Last update timestamp|
-
-### messages
-
-| Column               | Type        | Description                                      |
-| -------------------- | ----------- | ------------------------------------------------ |
-| id                   | text (PK)   | UUID                                             |
-| conversation_id      | text (FK)   | References conversations.id                      |
-| sub_conversation_id  | text (FK)   | References sub_conversations.id (nullable)       |
-| role                 | text        | "user" or "assistant"                            |
-| content              | text        | Message content                                  |
-| model_used           | jsonb       | ADE routing result (assistant messages)          |
-| tokens_input         | int4        | Input token count                                |
-| tokens_output        | int4        | Output token count                               |
-| tokens_reasoning     | int4        | Reasoning token count                            |
-| tokens_cached        | int4        | Cached token count                               |
-| cost_usd             | numeric     | Cost in USD                                      |
-| latency_ms           | int4        | Provider response latency                        |
-| ade_latency_ms       | int4        | ADE routing latency                              |
-| extended_data        | jsonb       | Thinking content, citations, etc.                |
-| tool_calls           | jsonb       | Tool call data                                   |
-| tool_call_id         | text        | Tool call identifier                             |
-| attachments          | jsonb       | File attachments                                 |
-| created_at           | timestamptz | Creation timestamp                               |
-
-When `sub_conversation_id` is NULL, the message belongs to the main conversation thread. When set, it belongs to a sub-conversation.
-
-### sub_conversations
-
-| Column            | Type        | Description                          |
-| ----------------- | ----------- | ------------------------------------ |
-| id                | text (PK)   | UUID                                 |
-| conversation_id   | text (FK)   | References conversations.id          |
-| parent_message_id | text (FK)   | References messages.id               |
-| highlighted_text  | text        | The text the user selected/highlighted |
-| created_at        | timestamptz | Creation timestamp                   |
-| updated_at        | timestamptz | Last update timestamp                |
-
-Sub-conversations are created when a user highlights text in an assistant message and starts a follow-up thread about that specific text. Each sub-conversation is anchored to the parent message it originated from.
-
-### routing_logs
-
-| Column            | Type        | Description                |
-| ----------------- | ----------- | -------------------------- |
-| id                | text (PK)   | UUID                       |
-| message_id        | text (FK)   | References messages.id     |
-| prompt            | text        | Original user prompt       |
-| recommended_model | jsonb       | ADE primary recommendation |
-| alternative_models| jsonb       | ADE backup models          |
-| analysis          | jsonb       | ADE query analysis         |
-| scoring_breakdown | jsonb       | ADE scoring details        |
-| ade_latency_ms    | int4        | ADE response latency       |
-| created_at        | timestamptz | Creation timestamp         |
-
-### api_call_logs
-
-| Column        | Type        | Description            |
-| ------------- | ----------- | ---------------------- |
-| id            | text (PK)   | UUID                   |
-| message_id    | text (FK)   | References messages.id |
-| provider      | text        | AI provider name       |
-| model_id      | text        | Model identifier       |
-| status_code   | int4        | HTTP status code       |
-| latency_ms    | int4        | Response latency       |
-| error_message | text        | Error details if any   |
-| retry_count   | int4        | Number of retries      |
-| created_at    | timestamptz | Creation timestamp     |
-
-## API Endpoints
-
-### POST /api/chat
-
-Main streaming chat endpoint. Accepts a message, routes it through ADE, calls the selected AI provider, and streams the response via SSE.
-
-**Request body:**
-
-```json
-{
-  "message": "How do I optimize a React component?",
-  "conversationId": "optional-uuid",
-  "subConversationId": "optional-uuid",
-  "userTier": "free",
-  "modality": "text",
-  "selectedModelId": "optional-model-id"
-}
-```
-
-When `subConversationId` is provided, the message is saved as part of that sub-conversation thread. The conversation history sent to the AI provider will include the highlighted text as context.
-
-**Response:** Server-Sent Events stream with the following event types:
-
-| Event      | Description                                    |
-| ---------- | ---------------------------------------------- |
-| `routing`  | ADE routing decision with model info           |
-| `thinking` | Reasoning/thinking tokens (streaming)          |
-| `delta`    | Response text tokens (streaming)               |
-| `citations`| Web search citations                           |
-| `tool_use` | Tool activity (web search in progress)         |
-| `done`     | Stream complete with usage stats               |
-| `error`    | Error information                              |
-
-### GET /api/conversations
-
-List all conversations with pagination.
-
-**Query params:** `limit` (default 20), `offset` (default 0)
-
-### POST /api/conversations
-
-Create a new conversation.
-
-**Request body:** `{ "title": "optional title" }`
-
-### GET /api/conversations/[id]
-
-Get a single conversation by ID.
-
-### GET /api/conversations/[id]/messages
-
-Get all messages for a conversation with pagination. Only returns main conversation messages (sub-conversation messages are excluded).
-
-**Query params:** `limit` (default 50), `offset` (default 0)
-
-### POST /api/conversations/[id]/messages/[messageId]/sub-conversations
-
-Create a sub-conversation anchored to a specific assistant message.
-
-**Request body:**
-
-```json
-{
-  "highlightedText": "The text the user selected"
-}
-```
-
-**Response:** `{ id, conversationId, parentMessageId, highlightedText, createdAt, updatedAt }`
-
-### GET /api/conversations/[id]/messages/[messageId]/sub-conversations
-
-List all sub-conversations for a specific message.
-
-**Response:** `{ subConversations: [{ id, conversationId, parentMessageId, highlightedText, createdAt, updatedAt }] }`
-
-### GET /api/sub-conversations/[subId]/messages
-
-Get all messages for a sub-conversation with pagination. Includes the sub-conversation metadata (highlighted text, parent message ID).
-
-**Query params:** `limit` (default 50), `offset` (default 0)
-
-**Response:** `{ subConversation: { id, conversationId, parentMessageId, highlightedText }, messages: [...] }`
-
-### GET /api/health
-
-Health check endpoint. Returns status of Supabase and ADE connectivity.
-
-## Supported AI Providers
-
-| Provider   | SDK                   | API                    | Models                           |
-| ---------- | --------------------- | ---------------------- | -------------------------------- |
-| OpenAI     | `openai`              | Responses API          | GPT-5, GPT-4.1, o3, o4-mini     |
-| Anthropic  | `@anthropic-ai/sdk`   | Messages API           | Claude Opus 4.6, Sonnet 4.6     |
-| Google     | `@google/genai`       | generateContentStream  | Gemini 2.5 Pro, 2.5 Flash       |
-| Perplexity | `openai` (custom URL) | Chat Completions       | Sonar, Sonar Pro                 |
-
-## Provider Features
-
-- **Extended thinking**: Enabled for Anthropic (Sonnet/Opus) and OpenAI reasoning models when query complexity is "demanding"
-- **Web search**: Enabled based on ADE's intent analysis (research, current events, etc.)
-- **Automatic fallback**: If the primary model fails, the backend tries the first available backup model from ADE's recommendations
-- **Unsupported provider handling**: ADE may recommend models from unsupported providers. The backend automatically falls back to the first backup model from a supported provider.
-
-## SSE Stream Flow
-
-The streaming experience follows this order:
-
-```
-1. routing    -> Model selection info (displayed immediately)
-2. thinking   -> Reasoning tokens (collapsible thinking block)
-3. delta      -> Response text (main content, token by token)
-4. citations  -> Web sources (displayed at end)
-5. done       -> Final usage stats (cost, latency, tokens)
-```
-
-## Scripts
+### Run
 
 ```bash
-npm run dev     # Start development server
-npm run build   # Production build
-npm run start   # Start production server
-npm run lint    # Run ESLint
+npm run dev      # http://localhost:3000
+npm run build    # production build
+npm start        # run production build
+npm run lint     # eslint
+npm test         # vitest
 ```
+
+---
+
+## API Surface
+
+All endpoints live under `/api`.
+
+| Area            | Endpoints                                                        |
+| --------------- | ---------------------------------------------------------------- |
+| Chat            | `POST /chat` (SSE stream)                                        |
+| Conversations   | `/conversations`, `/conversations/[id]`, `.../messages`          |
+| Sub-threads     | `.../messages/[messageId]/sub-conversations`, `/sub-conversations/[id]/messages` |
+| Images          | `/images` — image generation and retrieval                       |
+| Projects        | `/projects` — project grouping for conversations                 |
+| Shares          | `/shares` — public read-only conversation snapshots              |
+| Credits         | `/credits` — credit balance and usage                            |
+| Subscription    | `/subscription` — subscription status and plan                   |
+| Stripe          | `/stripe` — checkout and webhook handlers                        |
+| Settings        | `/settings` — user preferences                                   |
+| Avatar          | `/avatar` — avatar upload and retrieval                          |
+| Health          | `GET /health` — status of Supabase and ADE                       |
+| Cron            | `/cron` — scheduled maintenance jobs                             |
+
+### Chat stream events
+
+`POST /api/chat` returns an SSE stream. The ordered event types are:
+
+| Event      | Purpose                                             |
+| ---------- | --------------------------------------------------- |
+| `routing`  | ADE's model decision and routing metadata           |
+| `thinking` | Reasoning tokens (when the model supports them)     |
+| `delta`    | Response text, token by token                       |
+| `tool_use` | Tool activity (e.g. web search in progress)         |
+| `citations`| Web search citations                                |
+| `done`     | Final usage: tokens, cost, latency                  |
+| `error`    | Error payload                                       |
+
+---
+
+## Project Structure
+
+```
+src/
+├── app/api/         # Route handlers (chat, conversations, images, stripe, ...)
+├── lib/
+│   ├── ade.ts       # ADE client
+│   ├── supabase.ts  # Supabase client
+│   ├── providers/   # OpenAI, Anthropic, Gemini, Perplexity adapters
+│   ├── stream/      # SSE normalizer
+│   └── ...          # auth, cost, credits, rate limit, logger, etc.
+├── config/          # Model pricing
+└── migrations/      # Supabase SQL migrations
+```
+
+---
+
+## Provider Behavior
+
+- **Extended thinking** — enabled for reasoning-capable models when ADE flags the query as demanding
+- **Web search** — enabled when ADE detects research or current-events intent
+- **Automatic fallback** — if the primary model fails, the first viable backup from ADE's recommendations is used
+- **Unsupported providers** — if ADE recommends a provider not enabled here, the backend falls back to the first backup from a supported provider
+
+---
 
 ## Deployment
 
-This project is designed for deployment on Vercel:
-
-1. Connect your repository to Vercel
-2. Set all environment variables in the Vercel dashboard
-3. Deploy
-
-The `maxDuration` for the chat endpoint is set to 60 seconds to accommodate streaming responses.
-
-## License
-
-ISC
+Built for Vercel. Connect the repository, set environment variables in the project dashboard, and deploy. The chat endpoint uses `maxDuration: 60` to accommodate streaming.
