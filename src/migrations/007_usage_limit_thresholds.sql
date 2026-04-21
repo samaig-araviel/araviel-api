@@ -27,7 +27,8 @@ BEGIN
     ALTER TABLE user_settings
       ADD CONSTRAINT user_settings_usage_limit_thresholds_bounds
       CHECK (
-        usage_limit_thresholds <@ ARRAY(SELECT generate_series(1, 100))::INT[]
+        1 <= ALL(usage_limit_thresholds)
+        AND 100 >= ALL(usage_limit_thresholds)
       );
   END IF;
 END$$;
