@@ -12,14 +12,10 @@ const DEFAULT_SETTINGS = {
   custom_instructions: "",
   occupation: "",
   expertise: "",
-  font_size: "medium",
-  answer_font: "sans-serif",
-  compact_mode: false,
+  answer_font: "system",
   send_with_enter: true,
-  show_code_line_numbers: true,
   default_model: "auto",
   enable_reasoning: true,
-  show_model_info: true,
   web_search_default: "auto",
   image_quality_default: "standard",
   enable_follow_ups: true,
@@ -29,7 +25,7 @@ const DEFAULT_SETTINGS = {
   location_metadata: false,
   notify_new_features: true,
   notify_usage_limits: true,
-  notify_sounds: true,
+  usage_limit_thresholds: [20, 10, 5],
   avatar_url: "",
   full_name: "",
   phone: "",
@@ -46,14 +42,10 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
   customInstructions: "custom_instructions",
   occupation: "occupation",
   expertise: "expertise",
-  fontSize: "font_size",
   answerFont: "answer_font",
-  compactMode: "compact_mode",
   sendWithEnter: "send_with_enter",
-  showCodeLineNumbers: "show_code_line_numbers",
   defaultModel: "default_model",
   enableReasoning: "enable_reasoning",
-  showModelInfo: "show_model_info",
   webSearchDefault: "web_search_default",
   imageQualityDefault: "image_quality_default",
   enableFollowUps: "enable_follow_ups",
@@ -63,7 +55,7 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
   locationMetadata: "location_metadata",
   notifyNewFeatures: "notify_new_features",
   notifyUsageLimits: "notify_usage_limits",
-  notifySounds: "notify_sounds",
+  usageLimitThresholds: "usage_limit_thresholds",
   avatarUrl: "avatar_url",
   fullName: "full_name",
   phone: "phone",
@@ -71,10 +63,17 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
   location: "location",
 };
 
+// Whitelist of settings the API will accept. Anything outside this set is
+// dropped on write so old clients sending retired columns (font_size,
+// compact_mode, show_code_line_numbers, show_model_info, notify_sounds)
+// can't poison the row.
+const ALLOWED_COLUMNS = new Set(Object.values(CAMEL_TO_SNAKE));
+
 function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     const snakeKey = CAMEL_TO_SNAKE[key] ?? key;
+    if (!ALLOWED_COLUMNS.has(snakeKey)) continue;
     result[snakeKey] = value;
   }
   return result;
