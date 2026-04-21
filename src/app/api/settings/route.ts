@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS = {
   answer_font: "system",
   send_with_enter: true,
   default_model: "auto",
-  enable_reasoning: true,
+  enable_reasoning: false,
   web_search_default: "auto",
   image_quality_default: "standard",
   enable_follow_ups: true,
