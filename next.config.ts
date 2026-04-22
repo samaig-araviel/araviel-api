@@ -22,7 +22,9 @@ const nextConfig: NextConfig = {
           { key: "Access-Control-Allow-Origin", value: allowedOrigin },
           { key: "Access-Control-Allow-Methods", value: allowedMethods },
           { key: "Access-Control-Allow-Headers", value: allowedHeaders },
+          { key: "Access-Control-Allow-Credentials", value: "true" },
           { key: "Access-Control-Max-Age", value: "86400" },
+          { key: "Vary", value: "Origin" },
         ],
       },
     ];
