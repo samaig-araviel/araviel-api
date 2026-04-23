@@ -1,5 +1,6 @@
 import type { ADEResponse } from "@/lib/types";
 import {
+  ADE_CALLER_AUTH_HEADER,
   getAdeCallerSecret,
   getAdeToken,
   invalidateAdeToken,
@@ -7,8 +8,6 @@ import {
 import { logger } from "./logger";
 
 const log = logger.child({ module: "ade" });
-
-const ADE_CALLER_AUTH_HEADER = "X-ADE-Caller-Auth";
 
 interface ADERequestContext {
   conversationId?: string;
