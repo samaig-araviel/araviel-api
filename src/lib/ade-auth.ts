@@ -16,6 +16,12 @@ import { logger } from "./logger";
  * triggers exactly one signing operation.
  */
 
+/**
+ * Header that carries the Layer 0 shared secret on every outbound
+ * ADE request. Re-exported so callers do not duplicate the literal.
+ */
+export const ADE_CALLER_AUTH_HEADER = "X-ADE-Caller-Auth";
+
 const ADE_TOKEN_ISSUER = "araviel-api";
 const ADE_TOKEN_AUDIENCE = "ade";
 const ADE_TOKEN_TTL_SECONDS = 6 * 60 * 60;
@@ -186,6 +192,22 @@ export async function getAdeToken(forceRefresh = false): Promise<string> {
 export async function getAdeCallerSecret(): Promise<string> {
   const config = await getAdeAuthConfig();
   return config.callerSecret;
+}
+
+/**
+ * Build the full set of headers required to authenticate an outbound
+ * ADE call: the service JWT and the Layer 0 caller secret. Mints a
+ * fresh token on cold start, otherwise reuses the cached one.
+ */
+export async function buildAdeAuthHeaders(): Promise<Record<string, string>> {
+  const [token, callerSecret] = await Promise.all([
+    getAdeToken(),
+    getAdeCallerSecret(),
+  ]);
+  return {
+    Authorization: `Bearer ${token}`,
+    [ADE_CALLER_AUTH_HEADER]: callerSecret,
+  };
 }
 
 /**
