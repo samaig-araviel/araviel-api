@@ -55,17 +55,22 @@ import { requestContext } from "@/lib/request-context";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user: AuthenticatedUser;
   try {
     user = await authenticateRequest(request);
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+      return NextResponse.json(
+        { error: err.message },
+        { status: err.status, headers: corsHeaders(origin) }
+      );
     }
     throw err;
   }
@@ -77,7 +82,7 @@ export async function POST(request: NextRequest) {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      ...corsHeaders(),
+      ...corsHeaders(origin),
     },
   });
 
