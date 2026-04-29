@@ -10,8 +10,8 @@ import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
 /**
@@ -19,12 +19,14 @@ export async function OPTIONS() {
  * Returns the user's credit balance.
  */
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user: AuthenticatedUser;
   try {
     user = await authenticateRequest(request);
   } catch (err) {
     if (err instanceof AuthError) {
-      const headers = corsHeaders();
+      const headers = corsHeaders(origin);
       headers["Cache-Control"] = "no-cache, no-store, max-age=0";
       return NextResponse.json({ error: err.message }, { status: err.status, headers });
     }
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const balance = await getBalance(user.id);
-    const headers = corsHeaders();
+    const headers = corsHeaders(origin);
     headers["Cache-Control"] = "no-cache, no-store, max-age=0";
     return NextResponse.json(
       {
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest) {
       { headers }
     );
   } catch (err) {
-    const headers = corsHeaders();
+    const headers = corsHeaders(origin);
     headers["Cache-Control"] = "no-cache, no-store, max-age=0";
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to get balance" },
@@ -63,12 +65,17 @@ export async function GET(request: NextRequest) {
  * are granted. Direct self-service mutations have been removed.
  */
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user: AuthenticatedUser;
   try {
     user = await authenticateRequest(request);
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+      return NextResponse.json(
+        { error: err.message },
+        { status: err.status, headers: corsHeaders(origin) }
+      );
     }
     throw err;
   }
@@ -80,7 +87,7 @@ export async function POST(request: NextRequest) {
     if (!action) {
       return NextResponse.json(
         { error: "action is required" },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -88,19 +95,19 @@ export async function POST(request: NextRequest) {
       case "check": {
         const quality = body.quality ?? "standard";
         const result = await canGenerate(user.id, quality);
-        return NextResponse.json(result, { headers: corsHeaders() });
+        return NextResponse.json(result, { headers: corsHeaders(origin) });
       }
 
       default:
         return NextResponse.json(
           { error: `Unknown action: ${action}` },
-          { status: 400, headers: corsHeaders() }
+          { status: 400, headers: corsHeaders(origin) }
         );
     }
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 }

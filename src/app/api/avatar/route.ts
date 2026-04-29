@@ -6,8 +6,8 @@ import { corsHeaders, handleCorsOptions } from "../cors";
 const BUCKET = "avatars";
 const MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
 /**
@@ -16,6 +16,8 @@ export async function OPTIONS() {
  * Uploads the user's avatar to Supabase Storage and updates user_settings.
  */
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user;
   try {
     user = await authenticateRequest(request);
@@ -23,7 +25,7 @@ export async function POST(request: NextRequest) {
     if (err instanceof AuthError) {
       return NextResponse.json(
         { error: err.message },
-        { status: err.status, headers: corsHeaders() }
+        { status: err.status, headers: corsHeaders(origin) }
       );
     }
     throw err;
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (!image || typeof image !== "string") {
       return NextResponse.json(
         { error: "image is required (base64 data URI)" },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest) {
       if (!match) {
         return NextResponse.json(
           { error: "Invalid data URI format" },
-          { status: 400, headers: corsHeaders() }
+          { status: 400, headers: corsHeaders(origin) }
         );
       }
       mimeType = match[1];
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
     if (!allowedTypes.includes(mimeType)) {
       return NextResponse.json(
         { error: "Invalid image type. Allowed: PNG, JPEG, WebP" },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
     if (buffer.length > MAX_SIZE_BYTES) {
       return NextResponse.json(
         { error: `Image too large (${(buffer.length / (1024 * 1024)).toFixed(1)}MB). Max 2MB.` },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -96,7 +98,7 @@ export async function POST(request: NextRequest) {
     if (uploadError) {
       return NextResponse.json(
         { error: `Upload failed: ${uploadError.message}` },
-        { status: 500, headers: corsHeaders() }
+        { status: 500, headers: corsHeaders(origin) }
       );
     }
 
@@ -115,11 +117,11 @@ export async function POST(request: NextRequest) {
         { onConflict: "user_id" }
       );
 
-    return NextResponse.json({ avatarUrl }, { headers: corsHeaders() });
+    return NextResponse.json({ avatarUrl }, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to upload avatar" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 }
@@ -129,6 +131,8 @@ export async function POST(request: NextRequest) {
  * Removes the user's avatar from storage and clears the URL in settings.
  */
 export async function DELETE(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user;
   try {
     user = await authenticateRequest(request);
@@ -136,7 +140,7 @@ export async function DELETE(request: NextRequest) {
     if (err instanceof AuthError) {
       return NextResponse.json(
         { error: err.message },
-        { status: err.status, headers: corsHeaders() }
+        { status: err.status, headers: corsHeaders(origin) }
       );
     }
     throw err;
@@ -163,11 +167,11 @@ export async function DELETE(request: NextRequest) {
         { onConflict: "user_id" }
       );
 
-    return NextResponse.json({ success: true }, { headers: corsHeaders() });
+    return NextResponse.json({ success: true }, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to delete avatar" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 }

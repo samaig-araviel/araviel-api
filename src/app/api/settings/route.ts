@@ -79,8 +79,8 @@ function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
-export async function OPTIONS() {
-  return handleCorsOptions();
+export async function OPTIONS(request: NextRequest) {
+  return handleCorsOptions(request.headers.get("origin"));
 }
 
 /**
@@ -88,12 +88,17 @@ export async function OPTIONS() {
  * Returns the user's settings, falling back to defaults if none exist.
  */
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user: AuthenticatedUser;
   try {
     user = await authenticateRequest(request);
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+      return NextResponse.json(
+        { error: err.message },
+        { status: err.status, headers: corsHeaders(origin) }
+      );
     }
     throw err;
   }
@@ -109,7 +114,7 @@ export async function GET(request: NextRequest) {
     if (error) {
       return NextResponse.json(
         { error: error.message },
-        { status: 500, headers: corsHeaders() }
+        { status: 500, headers: corsHeaders(origin) }
       );
     }
 
@@ -117,11 +122,11 @@ export async function GET(request: NextRequest) {
       ? { ...DEFAULT_SETTINGS, ...data }
       : { ...DEFAULT_SETTINGS, user_id: user.id };
 
-    return NextResponse.json({ settings }, { headers: corsHeaders() });
+    return NextResponse.json({ settings }, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to get settings" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 }
@@ -132,12 +137,17 @@ export async function GET(request: NextRequest) {
  * Upserts the user's settings.
  */
 export async function PUT(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
   let user: AuthenticatedUser;
   try {
     user = await authenticateRequest(request);
   } catch (err) {
     if (err instanceof AuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders() });
+      return NextResponse.json(
+        { error: err.message },
+        { status: err.status, headers: corsHeaders(origin) }
+      );
     }
     throw err;
   }
@@ -149,7 +159,7 @@ export async function PUT(request: NextRequest) {
     if (!settings) {
       return NextResponse.json(
         { error: "settings are required" },
-        { status: 400, headers: corsHeaders() }
+        { status: 400, headers: corsHeaders(origin) }
       );
     }
 
@@ -166,15 +176,15 @@ export async function PUT(request: NextRequest) {
     if (error) {
       return NextResponse.json(
         { error: error.message },
-        { status: 500, headers: corsHeaders() }
+        { status: 500, headers: corsHeaders(origin) }
       );
     }
 
-    return NextResponse.json({ settings: data }, { headers: corsHeaders() });
+    return NextResponse.json({ settings: data }, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to update settings" },
-      { status: 500, headers: corsHeaders() }
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 }
