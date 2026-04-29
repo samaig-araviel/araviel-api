@@ -1,13 +1,14 @@
 /**
  * CORS allowlist.
  *
- * The set of allowed browser origins is loaded from the
- * `ALLOWED_ORIGINS` env var (comma-separated). This keeps preview,
- * staging, and custom-domain deployments configurable without code
- * changes. When the var is absent or empty we fall back to the known
- * production and local-development origins so a misconfigured
- * deployment still serves the canonical surfaces instead of mirroring
- * arbitrary origins.
+ * The set of allowed browser origins is the union of
+ * `FALLBACK_ALLOWED_ORIGINS` (the canonical production and
+ * local-development surfaces) and any extra origins supplied via the
+ * `ALLOWED_ORIGINS` env var (comma-separated). Merging instead of
+ * replacing keeps preview, staging, and custom-domain deployments
+ * configurable without code changes while ensuring a misconfigured
+ * env var cannot lock the deployment out of its own canonical
+ * surfaces.
  */
 
 const FALLBACK_ALLOWED_ORIGINS: readonly string[] = [
@@ -31,10 +32,8 @@ function parseAllowedOrigins(raw: string): readonly string[] {
 
 function loadAllowedOrigins(): readonly string[] {
   const raw = process.env.ALLOWED_ORIGINS;
-  if (!raw) return FALLBACK_ALLOWED_ORIGINS;
-
-  const parsed = parseAllowedOrigins(raw);
-  return parsed.length > 0 ? parsed : FALLBACK_ALLOWED_ORIGINS;
+  const configured = raw ? parseAllowedOrigins(raw) : [];
+  return Array.from(new Set([...FALLBACK_ALLOWED_ORIGINS, ...configured]));
 }
 
 function getAllowedOrigins(): readonly string[] {
