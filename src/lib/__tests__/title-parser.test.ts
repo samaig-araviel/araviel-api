@@ -6,6 +6,8 @@ import {
   flushTitleParser,
   extractAravielTitle,
   containsPartialTitle,
+  findTitleClose,
+  stripStrayTitleMarkers,
   TITLE_MAX_CHARS,
 } from "@/lib/stream/title-parser";
 
@@ -33,8 +35,8 @@ describe("sanitizeTitle", () => {
   });
 
   it("strips surrounding smart quotes", () => {
-    expect(sanitizeTitle("\u201CFix Docker OOM\u201D")).toBe("Fix Docker OOM");
-    expect(sanitizeTitle("\u2018Fix Docker OOM\u2019")).toBe("Fix Docker OOM");
+    expect(sanitizeTitle("“Fix Docker OOM”")).toBe("Fix Docker OOM");
+    expect(sanitizeTitle("‘Fix Docker OOM’")).toBe("Fix Docker OOM");
   });
 
   it("strips surrounding backticks, parens, and brackets", () => {
@@ -255,5 +257,71 @@ describe("containsPartialTitle", () => {
   it("does not flag unrelated content", () => {
     expect(containsPartialTitle("Just a sentence.")).toBe(false);
     expect(containsPartialTitle("Some <other> tag")).toBe(false);
+  });
+
+  it("treats a corrupted close tag as a complete block (no longer partial)", () => {
+    expect(
+      containsPartialTitle(
+        "<araviel_title>Drafting an email</araraviel_title> body",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("corrupted close tag tolerance", () => {
+  // Models occasionally emit "</araraviel_title>" — a single-token repetition
+  // glitch where the closing tag name picks up an extra "ar". Without tolerant
+  // matching, this leaks the entire block verbatim into the user-visible
+  // response (production bug observed 2026-05-03).
+  it("feedTitleChunk extracts the title even when the close tag is corrupted", () => {
+    const state = createTitleParseState();
+    const { title, deltaToEmit } = feedTitleChunk(
+      state,
+      "<araviel_title>Drafting an email</araraviel_title>Body here",
+    );
+    expect(title).toBe("Drafting an email");
+    expect(deltaToEmit).toBe("Body here");
+    expect(state.resolved).toBe(true);
+  });
+
+  it("extractAravielTitle strips a block with a corrupted close tag", () => {
+    const { cleanContent, title } = extractAravielTitle(
+      "<araviel_title>Drafting an email</araraviel_title>\n\nBody",
+    );
+    expect(title).toBe("Drafting an email");
+    expect(cleanContent).toBe("Body");
+    expect(cleanContent).not.toContain("araviel_title");
+  });
+
+  it("extractAravielTitle handles whitespace and casing in a corrupted close tag", () => {
+    const { cleanContent, title } = extractAravielTitle(
+      "<araviel_title>Hi</ Araraviel_Title >tail",
+    );
+    expect(title).toBe("Hi");
+    expect(cleanContent).toBe("tail");
+  });
+
+  it("findTitleClose locates the canonical close tag", () => {
+    const text = "abc</araviel_title>def";
+    expect(findTitleClose(text)).toEqual({ index: 3, length: 16 });
+  });
+
+  it("findTitleClose locates a corrupted close tag", () => {
+    const text = "abc</araraviel_title>def";
+    expect(findTitleClose(text)).toEqual({ index: 3, length: 18 });
+  });
+
+  it("findTitleClose returns null when no close tag is present", () => {
+    expect(findTitleClose("plain text")).toBeNull();
+  });
+
+  it("stripStrayTitleMarkers removes orphan opens and closes (canonical and corrupted)", () => {
+    expect(stripStrayTitleMarkers("hello <araviel_title> world")).toBe(
+      "hello  world",
+    );
+    expect(stripStrayTitleMarkers("hello </araraviel_title> world")).toBe(
+      "hello  world",
+    );
+    expect(stripStrayTitleMarkers("plain text")).toBe("plain text");
   });
 });
