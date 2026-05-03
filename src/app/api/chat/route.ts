@@ -8,6 +8,8 @@ import type { AravielMeta } from "@/lib/stream/meta-parser";
 import {
   extractAravielTitle,
   containsPartialTitle,
+  findTitleClose,
+  stripStrayTitleMarkers,
 } from "@/lib/stream/title-parser";
 import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
 import { dedupeCitations } from "@/lib/citations";
@@ -1370,7 +1372,6 @@ async function streamFromProvider(
     let tailBuffer = "";
     const META_OPEN = "<araviel_meta>";
     const TITLE_OPEN = "<araviel_title>";
-    const TITLE_CLOSE = "</araviel_title>";
 
     // Title SSE fires exactly once — post-stream — after the full response is
     // in hand. This avoids mid-stream race conditions and ensures the title is
@@ -1401,10 +1402,10 @@ async function streamFromProvider(
       while (true) {
         const openIdx = tailBuffer.indexOf(TITLE_OPEN);
         if (openIdx === -1) return;
-        const closeIdx = tailBuffer.indexOf(TITLE_CLOSE, openIdx + TITLE_OPEN.length);
-        if (closeIdx === -1) return; // wait for the rest
+        const close = findTitleClose(tailBuffer, openIdx + TITLE_OPEN.length);
+        if (!close) return; // wait for the rest
 
-        let after = closeIdx + TITLE_CLOSE.length;
+        let after = close.index + close.length;
         // Swallow one surrounding newline pair so stripped blocks don't leave
         // an awkward blank line in the delta stream.
         const before = tailBuffer.slice(0, openIdx);
@@ -1598,14 +1599,18 @@ async function streamFromProvider(
 
     // If there's any remaining tail buffer that wasn't part of the meta block, flush it.
     // (This handles the case where the AI didn't produce a meta block at all.)
-    const { cleanContent, meta } = extractAravielMeta(content);
+    const { cleanContent: metaStripped, meta } = extractAravielMeta(content);
+    // Final safety net: strip any orphan title markers (e.g. a corrupted close
+    // tag that escaped the structured stripper) so the saved/returned content
+    // never contains a visible <araviel_title> fragment.
+    const cleanContent = stripStrayTitleMarkers(metaStripped);
 
     // Flush any buffered non-meta content that wasn't sent during streaming.
     // Strip any stray (unclosed or otherwise) title markup so it can never reach
     // the client — the final saved `content` is already cleaned above.
     if (tailBuffer && !tailBuffer.includes(META_OPEN)) {
       const { cleanContent: safeTail } = extractAravielTitle(tailBuffer);
-      const sanitizedTail = safeTail.replace(TITLE_OPEN, "").replace(TITLE_CLOSE, "");
+      const sanitizedTail = stripStrayTitleMarkers(safeTail);
       if (sanitizedTail) {
         await sendSSE(writer, encoder, { type: "delta", data: { content: sanitizedTail } });
       }

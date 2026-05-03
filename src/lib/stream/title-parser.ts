@@ -12,6 +12,38 @@ const TITLE_OPEN = "<araviel_title>";
 const TITLE_CLOSE = "</araviel_title>";
 const TITLE_MAX_CHARS = 60;
 
+// Tolerant close-tag matcher. Models occasionally corrupt the closing tag with
+// letter repetition (observed in production: "</araraviel_title>"), which
+// silently breaks a strict-string search and causes the entire title block to
+// leak verbatim into the response. The pattern allows extra word characters
+// around "araviel" and "title" so common single-token glitches still match.
+const TITLE_CLOSE_RE = /<\/\s*[A-Za-z_]*araviel[A-Za-z_]*title[A-Za-z_]*\s*>/i;
+const TITLE_MARKER_RE_GLOBAL = /<\/?\s*[A-Za-z_]*araviel[A-Za-z_]*title[A-Za-z_]*\s*>/gi;
+
+/**
+ * Locate the first close-tag match at or after `fromIdx`. Returns the absolute
+ * index and matched length, or null if no tolerant match is found.
+ */
+export function findTitleClose(
+  text: string,
+  fromIdx = 0,
+): { index: number; length: number } | null {
+  if (fromIdx < 0) fromIdx = 0;
+  if (fromIdx >= text.length) return null;
+  const m = text.slice(fromIdx).match(TITLE_CLOSE_RE);
+  if (!m || m.index === undefined) return null;
+  return { index: fromIdx + m.index, length: m[0].length };
+}
+
+/**
+ * Remove any stray title open/close markers from the given text. Used as a
+ * last-line safety net so that orphan tags (without a matching counterpart)
+ * never reach the client even when the model produces malformed markup.
+ */
+export function stripStrayTitleMarkers(text: string): string {
+  return text.replace(TITLE_MARKER_RE_GLOBAL, "");
+}
+
 export interface TitleParseState {
   /** Raw content that has arrived so far. */
   buffer: string;
@@ -71,16 +103,16 @@ export function feedTitleChunk(state: TitleParseState, chunk: string): TitlePars
   // Case 1: the buffer (ignoring leading whitespace) starts with a complete
   // open tag — look for the close tag to extract the title.
   if (trimmed.startsWith(TITLE_OPEN)) {
-    const closeIdx = trimmed.indexOf(TITLE_CLOSE, TITLE_OPEN.length);
-    if (closeIdx === -1) {
-      // Still waiting for </araviel_title> — hold everything.
+    const close = findTitleClose(trimmed, TITLE_OPEN.length);
+    if (!close) {
+      // Still waiting for the close tag — hold everything.
       return { title: null, deltaToEmit: "" };
     }
 
-    const rawTitle = trimmed.slice(TITLE_OPEN.length, closeIdx);
+    const rawTitle = trimmed.slice(TITLE_OPEN.length, close.index);
     const sanitized = sanitizeTitle(rawTitle);
     const totalConsumedFromLeading =
-      whitespacePrefix + closeIdx + TITLE_CLOSE.length;
+      whitespacePrefix + close.index + close.length;
     const tailFromLeading = leading.slice(totalConsumedFromLeading);
 
     state.title = sanitized;
@@ -146,8 +178,8 @@ export function extractAravielTitle(content: string): {
       cleaned += content.slice(cursor);
       break;
     }
-    const closeIdx = content.indexOf(TITLE_CLOSE, openIdx + TITLE_OPEN.length);
-    if (closeIdx === -1) {
+    const close = findTitleClose(content, openIdx + TITLE_OPEN.length);
+    if (!close) {
       // Unterminated tag — leave the remainder untouched so the original flush
       // path can surface it verbatim rather than silently eating content.
       cleaned += content.slice(cursor);
@@ -157,7 +189,7 @@ export function extractAravielTitle(content: string): {
     // Preserve text before the tag, trimming a single surrounding blank line
     // so stripped blocks don't leave odd gaps.
     let prefix = content.slice(cursor, openIdx);
-    let suffixStart = closeIdx + TITLE_CLOSE.length;
+    let suffixStart = close.index + close.length;
 
     // If the block sits on its own line, absorb one trailing newline to avoid
     // leaving a dangling blank line in the visible content.
@@ -176,7 +208,7 @@ export function extractAravielTitle(content: string): {
 
     cleaned += prefix;
     if (title === null) {
-      const raw = content.slice(openIdx + TITLE_OPEN.length, closeIdx);
+      const raw = content.slice(openIdx + TITLE_OPEN.length, close.index);
       title = sanitizeTitle(raw);
     }
     cursor = suffixStart;
@@ -195,7 +227,10 @@ export function extractAravielTitle(content: string): {
  * tag characters so they never flash visibly.
  */
 export function containsPartialTitle(text: string): boolean {
-  if (text.includes(TITLE_OPEN) && !text.includes(TITLE_CLOSE)) return true;
+  const openIdx = text.indexOf(TITLE_OPEN);
+  if (openIdx !== -1 && !findTitleClose(text, openIdx + TITLE_OPEN.length)) {
+    return true;
+  }
   for (let i = 1; i <= TITLE_OPEN.length && i <= text.length; i++) {
     if (TITLE_OPEN.startsWith(text.slice(-i))) return true;
   }
@@ -259,8 +294,8 @@ const WRAPPER_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['"', '"'],
   ["'", "'"],
   ["`", "`"],
-  ["\u201C", "\u201D"], // left/right double smart quote
-  ["\u2018", "\u2019"], // left/right single smart quote
+  ["“", "”"], // left/right double smart quote
+  ["‘", "’"], // left/right single smart quote
   ["(", ")"],
   ["[", "]"],
   ["{", "}"],
