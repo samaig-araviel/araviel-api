@@ -32,6 +32,16 @@ export interface ChatRequest {
   weather?: string;
   conversationHasImages?: boolean;
   images?: ImageAttachment[];
+  /**
+   * User-selected reasoning mode toggles. Each flag corresponds to one entry in
+   * the frontend "Research" dropdown and only takes effect when the active
+   * model belongs to the matching provider. When set, the toggle overrides the
+   * ADE complexity classifier for the thinking decision; when absent, the
+   * classifier's default applies.
+   */
+  extendedThinking?: boolean;
+  deepResearch?: boolean;
+  googleThinking?: boolean;
 }
 
 export interface ModelInfo {

@@ -32,7 +32,7 @@ import {
   detectFileIntent,
   getProjectInstructionsForConversation,
   resolveWebSearch,
-  shouldEnableThinking,
+  resolveThinking,
   findSupportedBackup,
   validateSubConversation,
   fetchImportedConversationHistory,
@@ -443,7 +443,11 @@ async function handleChat(
     }
 
     const enableWebSearch = shouldUseWebSearch;
-    const enableThinking = shouldEnableThinking(adeResponse.analysis);
+    const enableThinking = resolveThinking(adeResponse.analysis, model.provider, {
+      extendedThinking: chatReq.extendedThinking,
+      deepResearch: chatReq.deepResearch,
+      googleThinking: chatReq.googleThinking,
+    });
 
     const apiCallLogs: ApiCallLogEntry[] = [];
     const pendingImages: PendingImageMeta[] = [];

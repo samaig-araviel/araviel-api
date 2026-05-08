@@ -14,8 +14,62 @@ function getThinkingBudget(complexity: string): number {
   }
 }
 
+type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";
+
+const LEVEL_RANK: Readonly<Record<GeminiThinkingLevel, number>> = {
+  minimal: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+};
+
+/**
+ * Gemini 3.x supported `thinkingLevel` values vary by model. Sending an
+ * unsupported level returns a 400 from the API, so we restrict per-model:
+ *   - Gemini 3 Pro: only `low` and `high`
+ *   - Gemini 3 Flash: `minimal`, `low`, `medium`, `high`
+ *   - Other 3.x (e.g. 3.1 Pro): `low`, `medium`, `high`
+ */
+function getAllowedThinkingLevels(modelId: string): readonly GeminiThinkingLevel[] {
+  if (modelId === "gemini-3-pro" || modelId.startsWith("gemini-3-pro-")) {
+    return ["low", "high"];
+  }
+  if (modelId.startsWith("gemini-3-flash") || modelId.startsWith("gemini-3.1-flash")) {
+    return ["minimal", "low", "medium", "high"];
+  }
+  return ["low", "medium", "high"];
+}
+
+/**
+ * Pick the highest allowed level that is ≤ the desired level. If the desired
+ * level is below every allowed level (rare — only when the model's floor is
+ * higher), fall back to the lowest allowed level.
+ */
+function clampThinkingLevel(
+  desired: GeminiThinkingLevel,
+  allowed: readonly GeminiThinkingLevel[]
+): GeminiThinkingLevel {
+  if (allowed.includes(desired)) return desired;
+  const desiredRank = LEVEL_RANK[desired];
+
+  let best: GeminiThinkingLevel | undefined;
+  let bestRank = -1;
+  for (const candidate of allowed) {
+    const rank = LEVEL_RANK[candidate];
+    if (rank <= desiredRank && rank > bestRank) {
+      best = candidate;
+      bestRank = rank;
+    }
+  }
+  if (best) return best;
+
+  return allowed.reduce((lowest, candidate) =>
+    LEVEL_RANK[candidate] < LEVEL_RANK[lowest] ? candidate : lowest
+  );
+}
+
 /** Gemini 3.x models use thinkingLevel (string enum). */
-function getThinkingLevel(complexity: string): string {
+function getThinkingLevel(complexity: string): GeminiThinkingLevel {
   switch (complexity) {
     case "demanding":
       return "high";
@@ -71,8 +125,11 @@ export class GeminiProvider implements AIProvider {
     // Build thinking config based on model generation
     let thinkingConfig: Record<string, unknown> | undefined;
     if (isGemini3) {
-      // Gemini 3.x: use thinkingLevel (string enum)
-      thinkingConfig = { thinkingLevel: getThinkingLevel(complexity) };
+      // Gemini 3.x: use thinkingLevel (string enum), clamped per-model since
+      // valid values differ (e.g. Gemini 3 Pro accepts only `low` and `high`).
+      const desired = getThinkingLevel(complexity);
+      const allowed = getAllowedThinkingLevels(config.modelId);
+      thinkingConfig = { thinkingLevel: clampThinkingLevel(desired, allowed) };
     } else if (isGemini25) {
       // Gemini 2.5: use thinkingBudget (integer), -1 for dynamic
       const budget = config.enableThinking ? getThinkingBudget(complexity) : 0;
