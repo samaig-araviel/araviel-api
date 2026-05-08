@@ -1164,6 +1164,85 @@ export interface ThinkingPreference {
 }
 
 /**
+ * Provider that each reasoning toggle targets. Returns null when no toggle is
+ * set — callers should leave model selection alone in that case.
+ */
+export function getPreferredThinkingProvider(
+  preference: ThinkingPreference
+): "anthropic" | "openai" | "google" | null {
+  if (preference.extendedThinking) return "anthropic";
+  if (preference.deepResearch) return "openai";
+  if (preference.googleThinking) return "google";
+  return null;
+}
+
+/**
+ * Default thinking-capable model per provider, used when ADE didn't surface
+ * any model from the user's requested provider in either the primary slot or
+ * the backup list. These are the best general-purpose reasoning models for
+ * each provider — the same defaults the dropdown's UI labels imply.
+ */
+const DEFAULT_THINKING_MODELS: Readonly<Record<"anthropic" | "openai" | "google", { id: string; name: string }>> = {
+  anthropic: { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
+  openai: { id: "o3-deep-research", name: "o3 Deep Research" },
+  google: { id: "gemini-3-pro", name: "Gemini 3 Pro" },
+};
+
+/**
+ * Steer model selection toward the provider implied by the user's reasoning
+ * toggle. ADE picks models based on prompt content alone — it has no
+ * visibility into the dropdown — so a user clicking "Extended Thinking" on a
+ * research-leaning prompt could otherwise end up on Perplexity Sonar instead
+ * of Claude. This override runs after ADE and before the routing event so the
+ * model the client sees is the model that actually answers.
+ *
+ * Override is skipped when the user manually selected a specific model (manual
+ * choice wins over the dropdown), when ADE already picked from the requested
+ * provider, or when the requested provider isn't configured server-side.
+ */
+export function applyThinkingProviderOverride(
+  resolved: { model: ModelInfo; backupModels: ModelInfo[]; isManualSelection: boolean },
+  preference: ThinkingPreference,
+  availableProviders: ReadonlyArray<string>
+): { model: ModelInfo; backupModels: ModelInfo[]; isManualSelection: boolean; overriddenForProvider?: string } {
+  if (resolved.isManualSelection) return resolved;
+
+  const target = getPreferredThinkingProvider(preference);
+  if (!target) return resolved;
+  if (resolved.model.provider === target) return resolved;
+  if (!availableProviders.includes(target)) return resolved;
+
+  const backupMatch = resolved.backupModels.find((m) => m.provider === target);
+  if (backupMatch) {
+    const newBackups = [
+      resolved.model,
+      ...resolved.backupModels.filter((m) => m.id !== backupMatch.id),
+    ];
+    return {
+      model: backupMatch,
+      backupModels: newBackups,
+      isManualSelection: resolved.isManualSelection,
+      overriddenForProvider: target,
+    };
+  }
+
+  const fallback = DEFAULT_THINKING_MODELS[target];
+  const overrideModel: ModelInfo = {
+    id: fallback.id,
+    name: fallback.name,
+    provider: target,
+    score: 0,
+    reasoning: "Selected to match the user's reasoning-mode preference",
+  };
+  return {
+    model: overrideModel,
+    backupModels: [resolved.model, ...resolved.backupModels],
+    isManualSelection: resolved.isManualSelection,
+    overriddenForProvider: target,
+  };
+}
+
+/**
  * Resolve whether thinking should be enabled for this request.
  *
  * Precedence: an explicit, provider-matching user toggle wins over ADE; when

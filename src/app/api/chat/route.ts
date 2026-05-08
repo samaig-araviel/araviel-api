@@ -33,6 +33,7 @@ import {
   getProjectInstructionsForConversation,
   resolveWebSearch,
   resolveThinking,
+  applyThinkingProviderOverride,
   findSupportedBackup,
   validateSubConversation,
   fetchImportedConversationHistory,
@@ -357,7 +358,21 @@ async function handleChat(
       return;
     }
 
-    const { model, backupModels, isManualSelection } = resolved;
+    // If the user picked a reasoning mode in the dropdown, steer model
+    // selection toward the matching provider. ADE chooses based on the prompt
+    // alone, so without this step a research-y prompt + "Extended Thinking"
+    // could still land on a non-Anthropic model.
+    const overridden = applyThinkingProviderOverride(
+      resolved,
+      {
+        extendedThinking: chatReq.extendedThinking,
+        deepResearch: chatReq.deepResearch,
+        googleThinking: chatReq.googleThinking,
+      },
+      availableProviders
+    );
+
+    const { model, backupModels, isManualSelection } = overridden;
 
     // 9. Generate messageId in memory — no DB insert yet
     const messageId = randomUUID();

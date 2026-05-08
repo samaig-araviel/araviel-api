@@ -8,6 +8,7 @@ import {
   resolveWebSearch,
   shouldEnableThinking,
   resolveThinking,
+  applyThinkingProviderOverride,
   detectFileIntent,
   findSupportedBackup,
 } from "@/lib/chat-helpers";
@@ -468,6 +469,113 @@ describe("resolveThinking", () => {
     expect(
       resolveThinking(demandingAnalysis, "openai", { extendedThinking: true })
     ).toBe(true);
+  });
+});
+
+// ─── applyThinkingProviderOverride ────────────────────────────────────────────
+
+describe("applyThinkingProviderOverride", () => {
+  const makeModel = (id: string, provider: string): ModelInfo => ({
+    id,
+    name: id,
+    provider,
+    score: 1,
+    reasoning: "",
+  });
+
+  const allProviders = ["openai", "anthropic", "google", "perplexity"];
+
+  it("returns the resolved model unchanged when no toggle is set", () => {
+    const resolved = {
+      model: makeModel("sonar", "perplexity"),
+      backupModels: [makeModel("claude-opus-4-7", "anthropic")],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(resolved, {}, allProviders);
+    expect(out.model.id).toBe("sonar");
+    expect(out.overriddenForProvider).toBeUndefined();
+  });
+
+  it("swaps to a backup of the requested provider when ADE picked elsewhere", () => {
+    const sonar = makeModel("sonar-deep-research", "perplexity");
+    const claude = makeModel("claude-opus-4-7", "anthropic");
+    const resolved = {
+      model: sonar,
+      backupModels: [claude, makeModel("gpt-5.2", "openai")],
+      isManualSelection: false,
+    };
+
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { extendedThinking: true },
+      allProviders
+    );
+
+    expect(out.model.id).toBe("claude-opus-4-7");
+    expect(out.overriddenForProvider).toBe("anthropic");
+    // Demoted primary should be retained as the new top backup
+    expect(out.backupModels[0]?.id).toBe("sonar-deep-research");
+  });
+
+  it("falls back to a default thinking model when no backup matches the provider", () => {
+    const resolved = {
+      model: makeModel("sonar-deep-research", "perplexity"),
+      backupModels: [makeModel("gpt-5.2", "openai")],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { googleThinking: true },
+      allProviders
+    );
+    expect(out.model.provider).toBe("google");
+    expect(out.model.id).toBe("gemini-3-pro");
+    expect(out.overriddenForProvider).toBe("google");
+  });
+
+  it("keeps the original model when ADE already picked the requested provider", () => {
+    const resolved = {
+      model: makeModel("claude-sonnet-4-6", "anthropic"),
+      backupModels: [makeModel("gpt-5.2", "openai")],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(out.model.id).toBe("claude-sonnet-4-6");
+    expect(out.overriddenForProvider).toBeUndefined();
+  });
+
+  it("does not override when the user manually selected a model", () => {
+    const resolved = {
+      model: makeModel("sonar", "perplexity"),
+      backupModels: [makeModel("claude-opus-4-7", "anthropic")],
+      isManualSelection: true,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(out.model.id).toBe("sonar");
+    expect(out.overriddenForProvider).toBeUndefined();
+  });
+
+  it("does not override when the requested provider is not configured", () => {
+    const resolved = {
+      model: makeModel("sonar", "perplexity"),
+      backupModels: [makeModel("gpt-5.2", "openai")],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { extendedThinking: true },
+      ["openai", "perplexity"] // anthropic missing
+    );
+    expect(out.model.id).toBe("sonar");
+    expect(out.overriddenForProvider).toBeUndefined();
   });
 });
 
