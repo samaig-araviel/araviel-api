@@ -7,6 +7,7 @@ import {
   getImageCapableModels,
   resolveWebSearch,
   shouldEnableThinking,
+  resolveThinking,
   detectFileIntent,
   findSupportedBackup,
 } from "@/lib/chat-helpers";
@@ -408,6 +409,65 @@ describe("shouldEnableThinking", () => {
     expect(
       shouldEnableThinking({ ...baseAnalysis, complexity: "simple" })
     ).toBe(false);
+  });
+});
+
+// ─── resolveThinking ──────────────────────────────────────────────────────────
+
+describe("resolveThinking", () => {
+  const standardAnalysis: ADEResponse["analysis"] = {
+    intent: "general",
+    domain: "general",
+    complexity: "standard",
+    tone: "neutral",
+    modality: "text",
+    keywords: [],
+    humanContextUsed: false,
+  };
+  const demandingAnalysis: ADEResponse["analysis"] = {
+    ...standardAnalysis,
+    complexity: "demanding",
+  };
+
+  it("falls back to ADE when no user preference is set", () => {
+    expect(resolveThinking(standardAnalysis, "anthropic", {})).toBe(false);
+    expect(resolveThinking(demandingAnalysis, "anthropic", {})).toBe(true);
+  });
+
+  it("forces thinking on when extendedThinking matches an Anthropic model", () => {
+    expect(
+      resolveThinking(standardAnalysis, "anthropic", { extendedThinking: true })
+    ).toBe(true);
+  });
+
+  it("forces thinking on when deepResearch matches an OpenAI model", () => {
+    expect(
+      resolveThinking(standardAnalysis, "openai", { deepResearch: true })
+    ).toBe(true);
+  });
+
+  it("forces thinking on when googleThinking matches a Google model", () => {
+    expect(
+      resolveThinking(standardAnalysis, "google", { googleThinking: true })
+    ).toBe(true);
+  });
+
+  it("ignores a toggle that targets a different provider", () => {
+    expect(
+      resolveThinking(standardAnalysis, "openai", { extendedThinking: true })
+    ).toBe(false);
+    expect(
+      resolveThinking(standardAnalysis, "google", { deepResearch: true })
+    ).toBe(false);
+    expect(
+      resolveThinking(standardAnalysis, "anthropic", { googleThinking: true })
+    ).toBe(false);
+  });
+
+  it("still falls through to ADE when a non-matching toggle is set", () => {
+    expect(
+      resolveThinking(demandingAnalysis, "openai", { extendedThinking: true })
+    ).toBe(true);
   });
 });
 

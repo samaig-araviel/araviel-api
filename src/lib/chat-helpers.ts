@@ -58,6 +58,9 @@ export function validateChatRequest(body: unknown): ChatRequest {
     weather: typeof req.weather === "string" ? req.weather : undefined,
     conversationHasImages: typeof req.conversationHasImages === "boolean" ? req.conversationHasImages : undefined,
     images: validateImages(req.images),
+    extendedThinking: typeof req.extendedThinking === "boolean" ? req.extendedThinking : undefined,
+    deepResearch: typeof req.deepResearch === "boolean" ? req.deepResearch : undefined,
+    googleThinking: typeof req.googleThinking === "boolean" ? req.googleThinking : undefined,
   };
 }
 
@@ -1147,6 +1150,39 @@ function detectWebSearchFromIntent(analysis: ADEResponse["analysis"]): boolean {
 
 export function shouldEnableThinking(analysis: ADEResponse["analysis"]): boolean {
   return analysis.complexity === "demanding";
+}
+
+/**
+ * User-selected reasoning preferences from the frontend "Research" dropdown.
+ * Each flag is provider-scoped: it only takes effect when the active model
+ * belongs to the matching provider.
+ */
+export interface ThinkingPreference {
+  extendedThinking?: boolean;
+  deepResearch?: boolean;
+  googleThinking?: boolean;
+}
+
+/**
+ * Resolve whether thinking should be enabled for this request.
+ *
+ * Precedence: an explicit, provider-matching user toggle wins over ADE; when
+ * the user has expressed no matching preference, fall back to the ADE
+ * complexity classifier so existing auto-routing behavior is preserved.
+ *
+ * Toggles that target a different provider than the active model are silently
+ * ignored — the dropdown is provider-aware in the UI but the backend treats
+ * mismatches as a no-op so we never send a flag the provider doesn't honor.
+ */
+export function resolveThinking(
+  analysis: ADEResponse["analysis"],
+  modelProvider: string,
+  preference: ThinkingPreference
+): boolean {
+  if (preference.extendedThinking && modelProvider === "anthropic") return true;
+  if (preference.deepResearch && modelProvider === "openai") return true;
+  if (preference.googleThinking && modelProvider === "google") return true;
+  return shouldEnableThinking(analysis);
 }
 
 /** Fast keyword check to detect if user is requesting a file download/export. */
