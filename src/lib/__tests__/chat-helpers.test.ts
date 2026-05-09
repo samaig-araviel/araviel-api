@@ -533,7 +533,75 @@ describe("applyThinkingProviderOverride", () => {
     expect(out.overriddenForProvider).toBe("google");
   });
 
-  it("keeps the original model when ADE already picked the requested provider", () => {
+  it("falls back to the deep-research default rather than a non-DR OpenAI backup", () => {
+    // Deep Research toggle requires a DR model; gpt-5.2 is OpenAI but is not
+    // a DR model, so swapping to it would silently downgrade the toggle.
+    const resolved = {
+      model: makeModel("sonar", "perplexity"),
+      backupModels: [makeModel("gpt-5.2", "openai")],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { deepResearch: true },
+      allProviders
+    );
+    expect(out.model.id).toBe("o3-deep-research");
+    expect(out.overriddenForProvider).toBe("openai");
+  });
+
+  it("prefers a thinking-capable OpenAI backup over the default", () => {
+    const resolved = {
+      model: makeModel("sonar", "perplexity"),
+      backupModels: [
+        makeModel("gpt-5.2", "openai"),
+        makeModel("o4-mini-deep-research", "openai"),
+      ],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { deepResearch: true },
+      allProviders
+    );
+    expect(out.model.id).toBe("o4-mini-deep-research");
+    expect(out.overriddenForProvider).toBe("openai");
+  });
+
+  it("falls back to default Claude when ADE only offers a non-thinking Claude model", () => {
+    // claude-3-5-haiku is Anthropic but not in the thinking set; using it
+    // would silently disable the toggle. Override must escalate to a
+    // thinking-capable Claude.
+    const resolved = {
+      model: makeModel("sonar", "perplexity"),
+      backupModels: [makeModel("claude-3-5-haiku-20241022", "anthropic")],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(out.model.id).toBe("claude-opus-4-7");
+    expect(out.overriddenForProvider).toBe("anthropic");
+  });
+
+  it("escalates to default when the primary is the same provider but not thinking-capable", () => {
+    const resolved = {
+      model: makeModel("claude-3-5-haiku-20241022", "anthropic"),
+      backupModels: [],
+      isManualSelection: false,
+    };
+    const out = applyThinkingProviderOverride(
+      resolved,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(out.model.id).toBe("claude-opus-4-7");
+    expect(out.overriddenForProvider).toBe("anthropic");
+  });
+
+  it("keeps the original model when ADE already picked a thinking-capable model from the requested provider", () => {
     const resolved = {
       model: makeModel("claude-sonnet-4-6", "anthropic"),
       backupModels: [makeModel("gpt-5.2", "openai")],

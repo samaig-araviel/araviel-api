@@ -43,6 +43,7 @@ import {
   getDeepResearchInstructions,
   supportsVision,
 } from "@/lib/chat-helpers";
+import { OPENAI_DEEP_RESEARCH_MODELS } from "@/lib/thinking-models";
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
@@ -453,7 +454,7 @@ async function handleChat(
     });
 
     // Append deep research instructions when using a deep research model
-    if (model.id === "o3-deep-research" || model.id === "o4-mini-deep-research") {
+    if (OPENAI_DEEP_RESEARCH_MODELS.has(model.id)) {
       systemPrompt += getDeepResearchInstructions();
     }
 

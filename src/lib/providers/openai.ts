@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { AIProvider, ProviderConfig, ProviderStreamEvent } from "./base";
 import type { Citation, ConversationMessage, TokenUsage } from "@/lib/types";
+import { OPENAI_DEEP_RESEARCH_MODELS as DEEP_RESEARCH_MODELS } from "@/lib/thinking-models";
 
 /**
  * Models that support the `image_generation` tool in the Responses API.
@@ -25,16 +26,6 @@ const IMAGE_GEN_TOOL_MODELS = new Set([
   "gpt-5-nano",
   // o-series (only o3 supports image_generation)
   "o3",
-]);
-
-/**
- * Deep research models require `web_search_preview` tool and do NOT support
- * streaming.  They use the same Responses API but with `stream: false` and
- * `reasoning.summary` for intermediate reasoning output.
- */
-const DEEP_RESEARCH_MODELS = new Set([
-  "o3-deep-research",
-  "o4-mini-deep-research",
 ]);
 
 function buildInput(
