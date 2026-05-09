@@ -16,6 +16,10 @@ import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { getChartInstructions } from "@/lib/prompts/chart-instructions";
 import { getArtifactInstructions } from "@/lib/prompts/artifact-instructions";
 import { getMessages as getImportedMessages } from "@/lib/imported-conversations";
+import {
+  DEFAULT_THINKING_MODELS,
+  isPreferredThinkingModel,
+} from "@/lib/thinking-models";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1177,18 +1181,6 @@ export function getPreferredThinkingProvider(
 }
 
 /**
- * Default thinking-capable model per provider, used when ADE didn't surface
- * any model from the user's requested provider in either the primary slot or
- * the backup list. These are the best general-purpose reasoning models for
- * each provider — the same defaults the dropdown's UI labels imply.
- */
-const DEFAULT_THINKING_MODELS: Readonly<Record<"anthropic" | "openai" | "google", { id: string; name: string }>> = {
-  anthropic: { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
-  openai: { id: "o3-deep-research", name: "o3 Deep Research" },
-  google: { id: "gemini-3-pro", name: "Gemini 3 Pro" },
-};
-
-/**
  * Steer model selection toward the provider implied by the user's reasoning
  * toggle. ADE picks models based on prompt content alone — it has no
  * visibility into the dropdown — so a user clicking "Extended Thinking" on a
@@ -1196,9 +1188,21 @@ const DEFAULT_THINKING_MODELS: Readonly<Record<"anthropic" | "openai" | "google"
  * of Claude. This override runs after ADE and before the routing event so the
  * model the client sees is the model that actually answers.
  *
- * Override is skipped when the user manually selected a specific model (manual
- * choice wins over the dropdown), when ADE already picked from the requested
- * provider, or when the requested provider isn't configured server-side.
+ * Selection rules, in order:
+ *   1. If the user manually selected a model, do nothing — manual choice
+ *      always wins over the dropdown.
+ *   2. If no toggle is set, do nothing.
+ *   3. If the requested provider isn't configured server-side, do nothing
+ *      (we'd just fail when trying to call it).
+ *   4. If ADE's primary already supports the toggle's thinking semantics,
+ *      keep it.
+ *   5. Otherwise, swap to the first ADE backup that does — ADE already
+ *      vetted the backups as suitable for the prompt.
+ *   6. If neither the primary nor any backup supports the toggle, fall back
+ *      to a known thinking-capable default for the provider. We never swap
+ *      to a same-provider-but-non-thinking-capable model, since that would
+ *      silently downgrade the toggle (the provider implementation only
+ *      sends thinking parameters for capable models).
  */
 export function applyThinkingProviderOverride(
   resolved: { model: ModelInfo; backupModels: ModelInfo[]; isManualSelection: boolean },
@@ -1209,18 +1213,25 @@ export function applyThinkingProviderOverride(
 
   const target = getPreferredThinkingProvider(preference);
   if (!target) return resolved;
-  if (resolved.model.provider === target) return resolved;
   if (!availableProviders.includes(target)) return resolved;
 
-  const backupMatch = resolved.backupModels.find((m) => m.provider === target);
-  if (backupMatch) {
-    const newBackups = [
-      resolved.model,
-      ...resolved.backupModels.filter((m) => m.id !== backupMatch.id),
-    ];
+  if (
+    resolved.model.provider === target &&
+    isPreferredThinkingModel(resolved.model.id, target)
+  ) {
+    return resolved;
+  }
+
+  const preferredBackup = resolved.backupModels.find(
+    (m) => m.provider === target && isPreferredThinkingModel(m.id, target)
+  );
+  if (preferredBackup) {
     return {
-      model: backupMatch,
-      backupModels: newBackups,
+      model: preferredBackup,
+      backupModels: [
+        resolved.model,
+        ...resolved.backupModels.filter((m) => m.id !== preferredBackup.id),
+      ],
       isManualSelection: resolved.isManualSelection,
       overriddenForProvider: target,
     };
