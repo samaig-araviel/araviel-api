@@ -54,6 +54,19 @@ export const DEFAULT_THINKING_MODELS: Readonly<
 };
 
 /**
+ * User-facing label for each reasoning toggle. Used in retry/downgrade
+ * notifications so the message names the specific mode the user activated
+ * (e.g. "Extended Thinking is off for this response") instead of a generic
+ * "thinking" label. Mirrors the frontend dropdown copy in
+ * `araviel-web/src/components/MainContent/MainContent.jsx` MODE_CONFIG.
+ */
+export const RESEARCH_MODE_LABELS: Readonly<Record<ThinkingTargetProvider, string>> = {
+  anthropic: "Extended Thinking",
+  openai: "Deep Research",
+  google: "Thinking Mode",
+};
+
+/**
  * Whether a Gemini model has any form of thinking support. Gemini 2.5 uses
  * `thinkingBudget`; Gemini 3.x uses `thinkingLevel`; older generations have
  * neither. The provider implementation handles the parameter-shape split —

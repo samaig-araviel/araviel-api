@@ -35,6 +35,7 @@ import {
   resolveThinking,
   applyThinkingProviderOverride,
   findSupportedBackup,
+  findThinkingAwareBackup,
   validateSubConversation,
   fetchImportedConversationHistory,
   isImageGenerationModel,
@@ -43,7 +44,10 @@ import {
   getDeepResearchInstructions,
   supportsVision,
 } from "@/lib/chat-helpers";
-import { OPENAI_DEEP_RESEARCH_MODELS } from "@/lib/thinking-models";
+import {
+  OPENAI_DEEP_RESEARCH_MODELS,
+  RESEARCH_MODE_LABELS,
+} from "@/lib/thinking-models";
 import { generateImage } from "@/lib/providers/image";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
@@ -359,17 +363,22 @@ async function handleChat(
       return;
     }
 
+    // Single canonical reasoning preference for this request. Both the
+    // post-ADE override and the retry-side backup picker consume it, so
+    // building it once keeps the two paths in lockstep.
+    const thinkingPreference = {
+      extendedThinking: chatReq.extendedThinking,
+      deepResearch: chatReq.deepResearch,
+      googleThinking: chatReq.googleThinking,
+    };
+
     // If the user picked a reasoning mode in the dropdown, steer model
     // selection toward the matching provider. ADE chooses based on the prompt
     // alone, so without this step a research-y prompt + "Extended Thinking"
     // could still land on a non-Anthropic model.
     const overridden = applyThinkingProviderOverride(
       resolved,
-      {
-        extendedThinking: chatReq.extendedThinking,
-        deepResearch: chatReq.deepResearch,
-        googleThinking: chatReq.googleThinking,
-      },
+      thinkingPreference,
       availableProviders
     );
 
@@ -459,11 +468,11 @@ async function handleChat(
     }
 
     const enableWebSearch = shouldUseWebSearch;
-    const enableThinking = resolveThinking(adeResponse.analysis, model.provider, {
-      extendedThinking: chatReq.extendedThinking,
-      deepResearch: chatReq.deepResearch,
-      googleThinking: chatReq.googleThinking,
-    });
+    const enableThinking = resolveThinking(
+      adeResponse.analysis,
+      model.provider,
+      thinkingPreference
+    );
 
     const apiCallLogs: ApiCallLogEntry[] = [];
     const pendingImages: PendingImageMeta[] = [];
@@ -979,26 +988,54 @@ async function handleChat(
 
     // 13. If primary failed, try backup
     if (!streamResult.success) {
-      const backup = findSupportedBackup(backupModels);
+      // Pick a backup that honors the user's reasoning toggle when possible.
+      // Falls through to any supported backup with `modeHonored: false` if no
+      // matching-provider thinking-capable model is available — the toggle is
+      // then disclosed as off for this response rather than silently dropped.
+      const backupChoice = findThinkingAwareBackup(
+        backupModels,
+        thinkingPreference,
+        availableProviders
+      );
 
-      if (backup) {
+      if (backupChoice) {
+        const { backup, modeHonored, downgradedFrom } = backupChoice;
+        const downgradeLabel =
+          !modeHonored && downgradedFrom !== null
+            ? RESEARCH_MODE_LABELS[downgradedFrom]
+            : null;
+        const retryMessage = downgradeLabel
+          ? `Retrying with backup model ${backup.name}. ${downgradeLabel} is off for this response.`
+          : `Retrying with backup model ${backup.name}...`;
+
         await sendSSE(writer, encoder, {
           type: "error",
           data: {
-            message: `Retrying with backup model ${backup.name}...`,
+            message: retryMessage,
             code: "PROVIDER_RETRY",
             fromModel: model.name,
             toModel: backup.name,
             reason: "The primary model encountered an error",
+            modeHonored,
+            downgradedFrom,
           },
         });
+
+        // Recompute thinking against the backup's provider so the toggle only
+        // forces thinking on when the backup supports it; otherwise the value
+        // falls back to ADE complexity, matching the rest of the pipeline.
+        const backupEnableThinking = resolveThinking(
+          adeResponse.analysis,
+          backup.provider,
+          thinkingPreference
+        );
 
         const backupResult = await streamFromProvider(
           backup,
           systemPrompt,
           history,
           enableWebSearch,
-          enableThinking,
+          backupEnableThinking,
           enableImageGeneration,
           chatReq.message,
           writer,
