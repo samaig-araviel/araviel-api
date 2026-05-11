@@ -3,28 +3,50 @@
  *
  * When included in the system prompt, these instructions teach AI models
  * to emit ```artifact code blocks containing self-contained HTML+CSS
- * that the frontend renders inline via DOMPurify sanitization.
+ * that the frontend renders inline via DOMPurify sanitization, plus a small
+ * set of structured blocks (timeline, comparison, chart, mermaid).
  *
  * All JavaScript is stripped — only static HTML+CSS is rendered.
  * CSS :hover, transitions, and animations still work.
  */
 
 export function getArtifactInstructions(): string {
-  return `## HTML Visual Artifacts
+  return `## Response shape
 
-For complex visual content that cannot be expressed well with standard blocks (organizational charts, color-coded grids, custom infographics, dashboards, visual diagrams), you MUST emit a \`\`\`artifact code block containing self-contained HTML+CSS.
+Default to rich, well-formatted markdown prose. Vary the shape of every answer: headings, paragraphs, bulleted and numbered lists, tables, blockquotes for notes/warnings, inline emphasis, links, and fenced code. Match the structure to the content — do not force every response into the same template. Sequential instructions belong in markdown numbered lists with whatever inline formatting they need (bold titles, sub-bullets, links, code snippets); do not wrap them in a custom block.
 
-### When to use artifacts vs native blocks:
-- Simple timeline (3-12 events): use \`\`\`timeline (simple or eras format)
-- Comparison (2-4 items): use \`\`\`comparison
-- Step-by-step guide: use \`\`\`steps
-- Data chart (line/bar/pie/etc): use \`\`\`chart
-- Diagrams & flowcharts: use \`\`\`mermaid
-- Org chart, custom grid, complex infographic, dashboard, visual reference: use \`\`\`artifact
+Reach for a custom rendered block ONLY when prose genuinely cannot represent the content well. When the user explicitly asks for a chart, timeline, comparison, diagram, or visual reference, use the matching block below. When you are choosing on your own, the bar is high — prefer markdown unless a block clearly conveys more than prose could.
 
-IMPORTANT: When the user asks for an org chart, seating chart, color-coded grid, or any complex visual reference, you MUST respond with a \`\`\`artifact code block. NEVER attempt these as markdown tables or plain text — they will look broken. See the examples below.
+## Available blocks
 
-### Rules:
+### \`\`\`timeline — anchored chronological events
+Use ONLY when each event has a real, specific anchored point in time (year, date, era) AND the chronology itself is the point of the answer (history of X, project roadmap with dates, evolution of a technology).
+Do NOT use for: procedural steps, lifecycle phases, mission stages, conceptual sequences, generic ordered lists, or "first… then… finally" narratives. Render those as markdown.
+
+### \`\`\`comparison — side-by-side comparison of 2–4 parallel options
+Use ONLY when items genuinely share the same dimensions (pricing tiers, frameworks, products, plans) and the user is choosing between them.
+Do NOT use for: pros/cons of a single thing, listing features, summarizing tradeoffs in prose, or any case where the items aren't truly parallel. Use a markdown table or prose.
+
+### \`\`\`chart — quantitative data visualization
+Supported types: line, area, bar, candlestick, pie, donut, composed, scatter.
+Use ONLY when there is real numeric data with at least one independent variable and one dependent variable, and a chart conveys more than a table would.
+Do NOT use for: qualitative breakdowns, conceptual diagrams, or fabricated illustrative numbers.
+
+### \`\`\`mermaid — flowcharts, sequence diagrams, state machines, ER diagrams
+Use when relationships are branched, cyclic, or otherwise non-linear and a diagram is clearer than prose.
+Do NOT use for: linear step sequences (use a markdown numbered list).
+
+### \`\`\`artifact — self-contained HTML+CSS for complex visuals that no other block fits
+Use ONLY when the user has asked for a complex visual reference (org chart, seating chart, color-coded grid, dashboard, custom infographic) and none of the structured blocks above fit. Follow the HTML rules below.
+
+## Do not invent new block languages
+
+Only the languages above are recognised. Anything else falls through to a normal code block. In particular, NEVER emit \`\`\`steps — render sequential instructions as a markdown numbered list with rich inline formatting (bold step titles, descriptions, sub-bullets, inline code, links, and fenced code blocks for commands).
+
+## HTML Visual Artifacts
+
+For \`\`\`artifact blocks specifically, follow these rules:
+
 - HTML+CSS ONLY. All JavaScript is stripped for security — do NOT include <script> tags or inline event handlers (onclick, onload, etc.). They will be removed.
 - All CSS must be in a <style> tag within the HTML or as inline styles. No external stylesheets or CDN links.
 - No external resources — no external images, fonts, or scripts. Everything must be self-contained.
@@ -43,15 +65,14 @@ IMPORTANT: When the user asks for an org chart, seating chart, color-coded grid,
 - Use a clean, modern design aesthetic with rounded corners, subtle shadows, and good whitespace.
 - Use soft, muted colors (rgba with low opacity like 0.12) for category backgrounds — they naturally adapt to both light and dark themes. Use the theme CSS variables for text and borders.
 
-### Do NOT use artifacts for:
+### Do NOT use \`\`\`artifact for:
 - Simple data tables with uniform rows and columns, like price lists or stat tables (use markdown tables instead)
-- Simple lists or comparisons (use native blocks)
+- Simple lists or comparisons (use markdown or \`\`\`comparison)
 - Data visualizations with numeric data (use \`\`\`chart)
 - Flowcharts or sequence diagrams (use \`\`\`mermaid)
+- Linear sequential instructions (use a markdown numbered list)
 
-### Examples
-
-Example — simple org chart using flexbox:
+### Example — simple org chart using flexbox
 \`\`\`artifact
 <style>
 .org{display:flex;flex-direction:column;align-items:center;gap:0;font-family:system-ui,sans-serif}
