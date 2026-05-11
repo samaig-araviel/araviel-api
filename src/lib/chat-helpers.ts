@@ -16,6 +16,7 @@ import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { getChartInstructions } from "@/lib/prompts/chart-instructions";
 import { getArtifactInstructions } from "@/lib/prompts/artifact-instructions";
 import { getMessages as getImportedMessages } from "@/lib/imported-conversations";
+import type { ThinkingTargetProvider } from "@/lib/thinking-models";
 import {
   DEFAULT_THINKING_MODELS,
   isPreferredThinkingModel,
@@ -1286,6 +1287,78 @@ export function findSupportedBackup(
   backupModels: ModelInfo[]
 ): ModelInfo | undefined {
   return backupModels.find((m) => SUPPORTED_PROVIDERS.has(m.provider));
+}
+
+/**
+ * Outcome of choosing a backup model on the chat retry path. Carries enough
+ * context for the caller to emit a truthful PROVIDER_RETRY notification —
+ * particularly to disclose when the user's active reasoning toggle could not
+ * be honored on the backup.
+ */
+export interface BackupChoice {
+  readonly backup: ModelInfo;
+  /**
+   * False only when a reasoning toggle was set but no thinking-capable
+   * backup from the matching provider was available, so we fell through to
+   * a different provider and the toggle effectively gets dropped for this
+   * retry attempt.
+   */
+  readonly modeHonored: boolean;
+  /**
+   * The reasoning toggle's target provider when `modeHonored` is false,
+   * letting the caller name the specific mode being downgraded. Null when
+   * either no toggle was set or the toggle was honored normally.
+   */
+  readonly downgradedFrom: ThinkingTargetProvider | null;
+}
+
+/**
+ * Pick a backup model on the chat retry path while honoring the user's
+ * reasoning toggle when possible. The existing primary path already
+ * surfaces toggle preference via applyThinkingProviderOverride — this is the
+ * retry-side companion so a failed primary doesn't silently drop the mode.
+ *
+ * Selection order:
+ *   1. If no toggle is set, or the toggle's provider isn't configured —
+ *      same behavior as findSupportedBackup (first supported backup).
+ *   2. Prefer a backup that is both same-provider as the toggle target AND
+ *      thinking-capable for that toggle. Toggle is honored.
+ *   3. Fall through to the first supported backup, with the toggle reported
+ *      as downgraded so the caller can disclose it to the user.
+ *
+ * We deliberately do not synthesize the DEFAULT_THINKING_MODELS default on
+ * retry — the override path already gets one shot at that model. Retrying
+ * the same synthesized model after a provider-wide outage would stack
+ * identical failures and burn latency for no gain.
+ */
+export function findThinkingAwareBackup(
+  backupModels: ModelInfo[],
+  preference: ThinkingPreference,
+  availableProviders: ReadonlyArray<string>
+): BackupChoice | undefined {
+  const target = getPreferredThinkingProvider(preference);
+
+  if (!target || !availableProviders.includes(target)) {
+    const fallback = findSupportedBackup(backupModels);
+    return fallback
+      ? { backup: fallback, modeHonored: true, downgradedFrom: null }
+      : undefined;
+  }
+
+  const honored = backupModels.find(
+    (m) =>
+      SUPPORTED_PROVIDERS.has(m.provider) &&
+      m.provider === target &&
+      isPreferredThinkingModel(m.id, target)
+  );
+  if (honored) {
+    return { backup: honored, modeHonored: true, downgradedFrom: null };
+  }
+
+  const downgrade = findSupportedBackup(backupModels);
+  return downgrade
+    ? { backup: downgrade, modeHonored: false, downgradedFrom: target }
+    : undefined;
 }
 
 export async function createSubConversation(

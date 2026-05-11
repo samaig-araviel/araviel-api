@@ -9,6 +9,7 @@ import {
   shouldEnableThinking,
   resolveThinking,
   applyThinkingProviderOverride,
+  findThinkingAwareBackup,
   detectFileIntent,
   findSupportedBackup,
 } from "@/lib/chat-helpers";
@@ -723,5 +724,123 @@ describe("findSupportedBackup", () => {
 
   it("returns undefined for empty array", () => {
     expect(findSupportedBackup([])).toBeUndefined();
+  });
+});
+
+// ─── findThinkingAwareBackup ──────────────────────────────────────────────────
+
+describe("findThinkingAwareBackup", () => {
+  const makeModel = (id: string, provider: string): ModelInfo => ({
+    id,
+    name: id,
+    provider,
+    score: 1,
+    reasoning: "",
+  });
+
+  const allProviders = ["openai", "anthropic", "google", "perplexity"];
+
+  it("behaves like findSupportedBackup when no toggle is set", () => {
+    const backups = [
+      makeModel("claude-3-5-haiku-20241022", "anthropic"),
+      makeModel("gpt-5.2", "openai"),
+    ];
+    const result = findThinkingAwareBackup(backups, {}, allProviders);
+    expect(result?.backup.id).toBe("claude-3-5-haiku-20241022");
+    expect(result?.modeHonored).toBe(true);
+    expect(result?.downgradedFrom).toBeNull();
+  });
+
+  it("prefers a thinking-capable backup matching the toggle's provider", () => {
+    const backups = [
+      makeModel("gpt-5.2", "openai"),
+      makeModel("claude-opus-4-7", "anthropic"),
+    ];
+    const result = findThinkingAwareBackup(
+      backups,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(result?.backup.id).toBe("claude-opus-4-7");
+    expect(result?.modeHonored).toBe(true);
+    expect(result?.downgradedFrom).toBeNull();
+  });
+
+  it("downgrades when only a non-thinking-capable same-provider backup exists", () => {
+    // claude-3-5-haiku is Anthropic but not in the thinking set — picking it
+    // would silently disable the toggle, so the helper falls through to any
+    // supported backup and reports the downgrade.
+    const backups = [
+      makeModel("claude-3-5-haiku-20241022", "anthropic"),
+      makeModel("gpt-5.2", "openai"),
+    ];
+    const result = findThinkingAwareBackup(
+      backups,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(result?.backup.id).toBe("claude-3-5-haiku-20241022");
+    expect(result?.modeHonored).toBe(false);
+    expect(result?.downgradedFrom).toBe("anthropic");
+  });
+
+  it("downgrades when no matching-provider backup exists at all", () => {
+    const backups = [
+      makeModel("gpt-5.2", "openai"),
+      makeModel("gemini-3-pro", "google"),
+    ];
+    const result = findThinkingAwareBackup(
+      backups,
+      { extendedThinking: true },
+      allProviders
+    );
+    expect(result?.backup.id).toBe("gpt-5.2");
+    expect(result?.modeHonored).toBe(false);
+    expect(result?.downgradedFrom).toBe("anthropic");
+  });
+
+  it("ignores the toggle when the requested provider is unavailable", () => {
+    const backups = [
+      makeModel("gpt-5.2", "openai"),
+      makeModel("claude-opus-4-7", "anthropic"),
+    ];
+    const result = findThinkingAwareBackup(
+      backups,
+      { extendedThinking: true },
+      ["openai"] // anthropic not configured
+    );
+    expect(result?.backup.id).toBe("gpt-5.2");
+    expect(result?.modeHonored).toBe(true);
+    expect(result?.downgradedFrom).toBeNull();
+  });
+
+  it("honors the Deep Research toggle and prefers a DR model over plain OpenAI", () => {
+    const backups = [
+      makeModel("gpt-5.2", "openai"),
+      makeModel("o3-deep-research", "openai"),
+    ];
+    const result = findThinkingAwareBackup(
+      backups,
+      { deepResearch: true },
+      allProviders
+    );
+    expect(result?.backup.id).toBe("o3-deep-research");
+    expect(result?.modeHonored).toBe(true);
+  });
+
+  it("returns undefined when no supported backup exists", () => {
+    expect(
+      findThinkingAwareBackup(
+        [makeModel("foo", "unsupported")],
+        { extendedThinking: true },
+        allProviders
+      )
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for empty backup list", () => {
+    expect(
+      findThinkingAwareBackup([], { extendedThinking: true }, allProviders)
+    ).toBeUndefined();
   });
 });
