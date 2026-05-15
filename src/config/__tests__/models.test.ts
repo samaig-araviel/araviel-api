@@ -45,10 +45,44 @@ describe("getModelPricing", () => {
       expect(pricing.outputPerMillion).toBe(8);
     });
 
-    it("returns correct pricing for image models", () => {
-      const pricing = getModelPricing("gpt-image-1", "openai");
+    it("returns correct pricing for gpt-image-2", () => {
+      const pricing = getModelPricing("gpt-image-2", "openai");
+      expect(pricing.inputPerMillion).toBe(5);
+      expect(pricing.outputPerMillion).toBe(30);
+    });
+
+    it("returns correct pricing for gpt-image-1.5", () => {
+      const pricing = getModelPricing("gpt-image-1.5", "openai");
       expect(pricing.inputPerMillion).toBe(0);
-      expect(pricing.outputPerMillion).toBe(19);
+      expect(pricing.outputPerMillion).toBe(34);
+    });
+
+    it("returns correct pricing for gpt-5.3-codex", () => {
+      const pricing = getModelPricing("gpt-5.3-codex", "openai");
+      expect(pricing.inputPerMillion).toBe(1.75);
+      expect(pricing.outputPerMillion).toBe(14);
+    });
+
+    it("returns correct pricing for gpt-5.4", () => {
+      const pricing = getModelPricing("gpt-5.4", "openai");
+      expect(pricing.inputPerMillion).toBe(2.5);
+      expect(pricing.outputPerMillion).toBe(15);
+    });
+
+    it("returns correct pricing for gpt-5.4-pro", () => {
+      const pricing = getModelPricing("gpt-5.4-pro", "openai");
+      expect(pricing.inputPerMillion).toBe(30);
+      expect(pricing.outputPerMillion).toBe(180);
+    });
+
+    it("retains historical pricing for retired models so archived messages still cost-calc", () => {
+      const retired = getModelPricing("gpt-image-1", "openai");
+      expect(retired.inputPerMillion).toBe(0);
+      expect(retired.outputPerMillion).toBe(19);
+
+      const codex = getModelPricing("gpt-5.2-codex", "openai");
+      expect(codex.inputPerMillion).toBe(1.75);
+      expect(codex.outputPerMillion).toBe(14);
     });
   });
 

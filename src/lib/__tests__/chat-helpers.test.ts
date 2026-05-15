@@ -275,7 +275,7 @@ describe("resolveModel", () => {
 
 describe("isImageGenerationModel", () => {
   it("returns true for dedicated image models", () => {
-    expect(isImageGenerationModel("gpt-image-1")).toBe(true);
+    expect(isImageGenerationModel("gpt-image-2")).toBe(true);
     expect(isImageGenerationModel("gpt-image-1.5")).toBe(true);
     expect(isImageGenerationModel("gpt-image-1-mini")).toBe(true);
     expect(isImageGenerationModel("imagen-4")).toBe(true);
@@ -288,13 +288,17 @@ describe("isImageGenerationModel", () => {
     expect(isImageGenerationModel("claude-opus-4-6")).toBe(false);
     expect(isImageGenerationModel("gemini-2.5-pro")).toBe(false);
   });
+
+  it("returns false for retired image model IDs", () => {
+    expect(isImageGenerationModel("gpt-image-1")).toBe(false);
+  });
 });
 
 // ─── canModelGenerateImages ───────────────────────────────────────────────────
 
 describe("canModelGenerateImages", () => {
   it("returns true for dedicated image models", () => {
-    expect(canModelGenerateImages("gpt-image-1")).toBe(true);
+    expect(canModelGenerateImages("gpt-image-2")).toBe(true);
   });
 
   it("returns true for native image gen chat models", () => {
