@@ -58,6 +58,7 @@ import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
 import { logger } from "@/lib/logger";
+import { coerceModelId, RetiredModelError } from "@/lib/retired-models";
 import { requestContext } from "@/lib/request-context";
 
 export const runtime = "nodejs";
@@ -134,6 +135,33 @@ async function handleChat(
     // 1. Parse and validate
     const body = await request.json();
     const chatReq = validateChatRequest(body);
+
+    // 1a. Coerce retired model IDs to their documented replacements. This is a
+    // safety net for stale client preferences and historical API callers using
+    // a model that the provider has since deprecated. Coerce hits are logged
+    // for observability; an unrecoverable retirement (no replacement) sends a
+    // clean SSE error and ends the stream.
+    if (chatReq.selectedModelId) {
+      try {
+        chatReq.selectedModelId = coerceModelId(chatReq.selectedModelId, {
+          route: "chat",
+          userId: user.id,
+        });
+      } catch (err) {
+        if (err instanceof RetiredModelError) {
+          await sendSSE(writer, encoder, {
+            type: "error",
+            data: {
+              message: `${err.retiredModelId} is no longer available from its provider. Please choose a different model.`,
+              code: "MODEL_RETIRED",
+            },
+          });
+          await writer.close();
+          return;
+        }
+        throw err;
+      }
+    }
 
     // 1b. Guest/anonymous credit handling
     let serverTier = "free";
@@ -1209,8 +1237,8 @@ interface ApiCallLogEntry {
  * Each entry is tried in order; models whose provider API key is missing are skipped.
  */
 const FALLBACK_IMAGE_MODELS = [
+  { id: "gpt-image-2", name: "GPT Image 2", provider: "openai", envKey: "OPENAI_API_KEY" },
   { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "openai", envKey: "OPENAI_API_KEY" },
-  { id: "gpt-image-1", name: "GPT Image 1", provider: "openai", envKey: "OPENAI_API_KEY" },
   { id: "imagen-4", name: "Imagen 4", provider: "google", envKey: "GOOGLE_API_KEY" },
   { id: "stable-diffusion-3.5", name: "Stable Diffusion 3.5", provider: "stability", envKey: "STABILITY_API_KEY" },
 ];

@@ -514,7 +514,7 @@ function guessProviderFromModelId(modelId: string): string {
 
 /** Dedicated image generation models that use separate image APIs (not chat/streaming). */
 const DEDICATED_IMAGE_MODELS = new Set([
-  "gpt-image-1",
+  "gpt-image-2",
   "gpt-image-1.5",
   "gpt-image-1-mini",
   "imagen-4",
@@ -538,7 +538,6 @@ const NATIVE_IMAGE_GEN_MODELS = new Set([
   "gpt-4o-mini",
   "gpt-4.1",
   "gpt-4.1-mini",
-  "gpt-4.1-nano",
   "gpt-5",
   "gpt-5.2",
   "gpt-5.4",
@@ -562,14 +561,14 @@ export function canModelGenerateImages(modelId: string): boolean {
 /** Models that do NOT support vision (image input for analysis). */
 const NON_VISION_MODELS = new Set([
   // Dedicated image generation models
-  "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini",
+  "gpt-image-2", "gpt-image-1.5", "gpt-image-1-mini",
   "imagen-4", "imagen-3",
   "stable-diffusion-3.5",
   // TTS / audio-only models
   "gpt-4o-mini-tts",
   "elevenlabs-tts-flash", "elevenlabs-tts-multilingual", "elevenlabs-music",
   // Video-only models
-  "sora-2", "veo-3.1",
+  "veo-3.1",
 ]);
 
 /**
@@ -591,6 +590,7 @@ export function getImageCapableModels(): {
 } {
   return {
     dedicated: [
+      { id: "gpt-image-2", name: "GPT Image 2", provider: "OpenAI" },
       { id: "gpt-image-1.5", name: "GPT Image 1.5", provider: "OpenAI" },
       { id: "gpt-image-1-mini", name: "GPT Image 1 Mini", provider: "OpenAI" },
       { id: "imagen-4", name: "Imagen 4", provider: "Google" },

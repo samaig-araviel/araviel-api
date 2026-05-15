@@ -5,10 +5,11 @@ import { OPENAI_DEEP_RESEARCH_MODELS as DEEP_RESEARCH_MODELS } from "@/lib/think
 
 /**
  * Models that support the `image_generation` tool in the Responses API.
- * Per OpenAI docs (March 2026), this tool is available for GPT-4o series,
- * GPT-4.1 series, GPT-5 series, and o3 (only o3 from the o-series; o3-pro
- * and o4-mini do NOT support image_generation).
- * For other models, image generation should be routed to a dedicated image model.
+ * Per OpenAI docs, this tool is available for GPT-4o series, GPT-4.1 series
+ * (excluding nano variants), GPT-5 series, and o3 (only o3 from the
+ * o-series; o3-pro and o4-mini do NOT support image_generation).
+ * For other models, image generation should be routed to a dedicated image
+ * model via `generateOpenAIImage`.
  */
 const IMAGE_GEN_TOOL_MODELS = new Set([
   // GPT-4o series
@@ -17,7 +18,6 @@ const IMAGE_GEN_TOOL_MODELS = new Set([
   // GPT-4.1 series
   "gpt-4.1",
   "gpt-4.1-mini",
-  "gpt-4.1-nano",
   // GPT-5 series (gpt-5-mini explicitly does NOT support image_generation)
   "gpt-5",
   "gpt-5.2",

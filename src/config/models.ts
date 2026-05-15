@@ -4,18 +4,18 @@ interface ModelPricing {
 }
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
-  // OpenAI
+  // OpenAI — current
+  "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15 },
+  "gpt-5.4-pro": { inputPerMillion: 30, outputPerMillion: 180 },
   "gpt-5.2": { inputPerMillion: 1.75, outputPerMillion: 14 },
   "gpt-5.2-pro": { inputPerMillion: 21, outputPerMillion: 168 },
   "gpt-5.1": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gpt-5": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gpt-5-mini": { inputPerMillion: 0.25, outputPerMillion: 2 },
   "gpt-5-nano": { inputPerMillion: 0.05, outputPerMillion: 0.4 },
-  "gpt-5.1-codex": { inputPerMillion: 1.25, outputPerMillion: 10 },
-  "gpt-5.1-codex-mini": { inputPerMillion: 0.25, outputPerMillion: 2 },
+  "gpt-5.3-codex": { inputPerMillion: 1.75, outputPerMillion: 14 },
   "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8 },
   "gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6 },
-  "gpt-4.1-nano": { inputPerMillion: 0.1, outputPerMillion: 1.4 },
   "gpt-4o": { inputPerMillion: 2.5, outputPerMillion: 10 },
   "gpt-4o-mini": { inputPerMillion: 0.15, outputPerMillion: 0.6 },
   "o3": { inputPerMillion: 2, outputPerMillion: 8 },
@@ -23,6 +23,17 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "o4-mini": { inputPerMillion: 1.1, outputPerMillion: 4.4 },
   "o3-deep-research": { inputPerMillion: 10, outputPerMillion: 40 },
   "o4-mini-deep-research": { inputPerMillion: 2, outputPerMillion: 8 },
+
+  // OpenAI — historical pricing retained for cost lookup on archived messages.
+  // Retired entries are coerced to current models by `coerceModelId` before
+  // any provider call; they remain here so past conversations cost-calc
+  // against the rate that was actually billed at the time.
+  "gpt-5.1-codex": { inputPerMillion: 1.25, outputPerMillion: 10 }, // retired 2026-07-23
+  "gpt-5.1-codex-mini": { inputPerMillion: 0.25, outputPerMillion: 2 }, // retired 2026-07-23
+  "gpt-5.2-codex": { inputPerMillion: 1.75, outputPerMillion: 14 }, // retired 2026-07-23
+  "gpt-4.1-nano": { inputPerMillion: 0.1, outputPerMillion: 1.4 }, // retired 2026-10-23
+  "gpt-image-1": { inputPerMillion: 0, outputPerMillion: 19 }, // retired 2026-10-23
+  "sora-2": { inputPerMillion: 15, outputPerMillion: 60 }, // retired 2026-09-24
 
   // Anthropic
   "claude-opus-4-7": { inputPerMillion: 5, outputPerMillion: 25 },
@@ -47,10 +58,10 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "sonar": { inputPerMillion: 1, outputPerMillion: 1 },
   "sonar-pro": { inputPerMillion: 3, outputPerMillion: 15 },
 
-  // Image generation models
+  // Image generation models — current
+  "gpt-image-2": { inputPerMillion: 5, outputPerMillion: 30 },
   "gpt-image-1.5": { inputPerMillion: 0, outputPerMillion: 34 },
   "gpt-image-1-mini": { inputPerMillion: 0, outputPerMillion: 8 },
-  "gpt-image-1": { inputPerMillion: 0, outputPerMillion: 19 },
   "imagen-4": { inputPerMillion: 40, outputPerMillion: 60 },
   "imagen-3": { inputPerMillion: 40, outputPerMillion: 60 },
   "stable-diffusion-3.5": { inputPerMillion: 30, outputPerMillion: 50 },
