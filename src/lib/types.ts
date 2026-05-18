@@ -136,8 +136,26 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  /** Tokens served from the provider's prompt cache (cheap reads). */
   cachedTokens: number;
+  /** Tokens written into the provider's prompt cache on this request (premium writes). */
+  cacheCreationTokens?: number;
   webSearchRequests?: number;
+}
+
+/**
+ * Structured form of the system prompt for providers that support
+ * prefix-based prompt caching (currently Anthropic). `stable` holds the
+ * static instructions identical across requests and should be marked
+ * as a cache breakpoint. `variable` holds the per-request, per-user,
+ * or per-project content that sits after the breakpoint.
+ *
+ * Providers that don't support caching ignore the structured form and
+ * use the existing `systemPrompt` string instead.
+ */
+export interface SystemPromptParts {
+  stable: string;
+  variable?: string;
 }
 
 export interface Citation {

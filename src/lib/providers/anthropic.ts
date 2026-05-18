@@ -58,10 +58,35 @@ export class AnthropicProvider implements AIProvider {
 
     const maxTokens = useThinking ? 16384 : 8192;
 
+    // Build `system` as an array of cacheable text blocks when structured
+    // parts are provided. A single `cache_control: ephemeral` breakpoint
+    // sits on the stable block so the static instruction prefix is reused
+    // across requests. The variable block (title / project / user prefs)
+    // follows without a breakpoint. Tools render before `system` in the
+    // cache prefix, so the tool definitions above are cached together
+    // with the stable system block.
+    //
+    // When no parts are provided, fall back to the existing string form
+    // (no caching). This keeps callers that pass only `systemPrompt`
+    // working unchanged.
+    const system: Anthropic.MessageCreateParamsStreaming["system"] =
+      config.systemPromptParts
+        ? [
+            {
+              type: "text",
+              text: config.systemPromptParts.stable,
+              cache_control: { type: "ephemeral" },
+            },
+            ...(config.systemPromptParts.variable
+              ? [{ type: "text" as const, text: config.systemPromptParts.variable }]
+              : []),
+          ]
+        : config.systemPrompt;
+
     const params: Anthropic.MessageCreateParamsStreaming = {
       model: config.modelId,
       max_tokens: maxTokens,
-      system: config.systemPrompt,
+      system,
       messages: buildMessages(config.messages),
       stream: true,
       ...(tools.length > 0 ? { tools } : {}),
@@ -114,12 +139,12 @@ export class AnthropicProvider implements AIProvider {
     if (finalMessage.usage) {
       usage.inputTokens = finalMessage.usage.input_tokens ?? 0;
       usage.outputTokens = finalMessage.usage.output_tokens ?? 0;
-      usage.cachedTokens =
-        (
-          finalMessage.usage as Anthropic.Usage & {
-            cache_read_input_tokens?: number;
-          }
-        ).cache_read_input_tokens ?? 0;
+      const cacheUsage = finalMessage.usage as Anthropic.Usage & {
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
+      usage.cachedTokens = cacheUsage.cache_read_input_tokens ?? 0;
+      usage.cacheCreationTokens = cacheUsage.cache_creation_input_tokens ?? 0;
     }
 
     // Track web search requests from server tool usage

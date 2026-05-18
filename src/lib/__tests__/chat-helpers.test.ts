@@ -12,6 +12,7 @@ import {
   findThinkingAwareBackup,
   detectFileIntent,
   findSupportedBackup,
+  buildSystemPromptParts,
 } from "@/lib/chat-helpers";
 import type { ADEResponse, ADEModelResult, ModelInfo } from "@/lib/types";
 
@@ -846,5 +847,96 @@ describe("findThinkingAwareBackup", () => {
     expect(
       findThinkingAwareBackup([], { extendedThinking: true }, allProviders)
     ).toBeUndefined();
+  });
+});
+
+// ─── buildSystemPromptParts ───────────────────────────────────────────────────
+//
+// These tests lock in the contract that the prompt-caching implementation
+// depends on: the `stable` block must be byte-identical across requests
+// that share the same flags, and per-request / per-user / per-project
+// content must live in `variable` (after the cache breakpoint), never in
+// `stable`. If you change these tests, audit `buildSystemPromptParts` for
+// silent invalidators (timestamps, UUIDs, non-deterministic serialization)
+// before approving the change.
+
+describe("buildSystemPromptParts", () => {
+  it("produces byte-identical stable output across calls with the same flags", () => {
+    const a = buildSystemPromptParts(undefined, {});
+    const b = buildSystemPromptParts(undefined, {});
+    expect(a.stable).toBe(b.stable);
+  });
+
+  it("produces byte-identical stable output regardless of project / user / title", () => {
+    const a = buildSystemPromptParts(undefined, {});
+    const b = buildSystemPromptParts("Some project rules", {
+      includeTitleInstructions: true,
+      userSettings: {
+        customInstructions: "Always cite sources",
+        responseTone: "professional",
+        preferredLanguage: "English",
+      },
+    });
+    // Variable parts differ between (a) and (b) — but the stable prefix
+    // (the part marked with cache_control) must be identical, or the
+    // cache cannot be shared across these requests.
+    expect(a.stable).toBe(b.stable);
+  });
+
+  it("includes file-block instructions in stable when the flag is set", () => {
+    const withFiles = buildSystemPromptParts(undefined, { includeFileInstructions: true });
+    const withoutFiles = buildSystemPromptParts(undefined, { includeFileInstructions: false });
+    expect(withFiles.stable).not.toBe(withoutFiles.stable);
+    expect(withFiles.stable).toContain("File");
+  });
+
+  it("places title instructions in variable, not stable", () => {
+    const withTitle = buildSystemPromptParts(undefined, { includeTitleInstructions: true });
+    const withoutTitle = buildSystemPromptParts(undefined, {});
+    // Stable must be identical so the cached prefix is reused across
+    // new-conversation and continuing-conversation requests.
+    expect(withTitle.stable).toBe(withoutTitle.stable);
+    // Title content lands in the variable section.
+    expect(withTitle.variable).toContain("<araviel_title>");
+    expect(withoutTitle.variable).toBeUndefined();
+  });
+
+  it("places project instructions in variable, not stable", () => {
+    const withProject = buildSystemPromptParts("Use TypeScript only");
+    expect(withProject.stable).not.toContain("Use TypeScript only");
+    expect(withProject.variable).toContain("Use TypeScript only");
+    expect(withProject.variable).toContain("--- Project Instructions ---");
+  });
+
+  it("places user preferences in variable, not stable", () => {
+    const withPrefs = buildSystemPromptParts(undefined, {
+      userSettings: {
+        responseTone: "candid",
+        occupation: "engineer",
+        preferredLanguage: "English",
+      },
+    });
+    expect(withPrefs.stable).not.toContain("--- User Preferences ---");
+    expect(withPrefs.variable).toContain("--- User Preferences ---");
+    expect(withPrefs.variable).toContain("engineer");
+  });
+
+  it("returns undefined variable when no variable content is present", () => {
+    const result = buildSystemPromptParts(undefined, {});
+    expect(result.variable).toBeUndefined();
+  });
+
+  it("orders variable content: title, then project, then user prefs", () => {
+    const result = buildSystemPromptParts("Project rules here", {
+      includeTitleInstructions: true,
+      userSettings: { responseTone: "professional", preferredLanguage: "English" },
+    });
+    const v = result.variable ?? "";
+    const titleIdx = v.indexOf("<araviel_title>");
+    const projectIdx = v.indexOf("--- Project Instructions ---");
+    const prefsIdx = v.indexOf("--- User Preferences ---");
+    expect(titleIdx).toBeGreaterThanOrEqual(0);
+    expect(projectIdx).toBeGreaterThan(titleIdx);
+    expect(prefsIdx).toBeGreaterThan(projectIdx);
   });
 });
