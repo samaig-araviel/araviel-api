@@ -58,7 +58,7 @@ import type { TextCreditState } from "@/lib/subscription";
 import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
 import { corsHeaders, handleCorsOptions } from "../cors";
-import { logger } from "@/lib/logger";
+import { logger, type Logger } from "@/lib/logger";
 import { coerceModelId, RetiredModelError } from "@/lib/retired-models";
 import { requestContext } from "@/lib/request-context";
 
@@ -932,7 +932,8 @@ async function handleChat(
             pendingImages,
             chatReq.images,
             undefined, // titleContext — image backup path doesn't generate titles
-            systemPromptParts
+            systemPromptParts,
+            log
           );
 
           if (backupResult.success) {
@@ -1030,7 +1031,8 @@ async function handleChat(
       pendingImages,
       chatReq.images,
       titleContext,
-      systemPromptParts
+      systemPromptParts,
+      log
     );
 
     // 13. If primary failed, try backup
@@ -1093,7 +1095,8 @@ async function handleChat(
           pendingImages,
           chatReq.images,
           titleContext,
-          systemPromptParts
+          systemPromptParts,
+          log
         );
 
         if (!backupResult.success) {
@@ -1117,6 +1120,10 @@ async function handleChat(
             primaryProvider: model.provider,
             backupModel: backup.id,
             backupProvider: backup.provider,
+            userFacingError: backupResult.error,
+            failedCalls: summarizeFailedCalls(apiCallLogs),
+            conversationId,
+            messageId,
           });
           await sendSSE(writer, encoder, {
             type: "error",
@@ -1163,7 +1170,10 @@ async function handleChat(
         log.error("Primary model failed with no backup available", undefined, {
           model: model.id,
           provider: model.provider,
-          upstreamError: streamResult.error,
+          userFacingError: streamResult.error,
+          failedCalls: summarizeFailedCalls(apiCallLogs),
+          conversationId,
+          messageId,
         });
         await sendSSE(writer, encoder, {
           type: "error",
@@ -1418,9 +1428,10 @@ async function streamFromProvider(
   pendingImages?: PendingImageMeta[],
   uploadedImages?: ImageAttachment[],
   titleContext?: TitleContext,
-  systemPromptParts?: SystemPromptParts
+  systemPromptParts?: SystemPromptParts,
+  parentLog?: Logger
 ): Promise<StreamResult> {
-  const log = logger.child({ route: "chat", subRoute: "stream-provider", provider: model.provider, model: model.id });
+  const log = (parentLog ?? logger).child({ subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
   let content = "";
   let thinkingContent = "";
@@ -1745,12 +1756,32 @@ async function streamFromProvider(
   } catch (err) {
     const latencyMs = Date.now() - start;
     const rawError = err instanceof Error ? err.message : "Unknown provider error";
+    const details = extractProviderErrorDetails(err);
+    const statusCode = details.status ?? 500;
 
-    // Log the raw error for debugging
+    // Server-side only: client sees a sanitized variant via `error` below,
+    // but the original cause (rate limit, auth, upstream 5xx, network) is
+    // lost without an explicit log line — `apiCallLogs` lives in memory.
+    log.error("Provider stream failed", err, {
+      latencyMs,
+      statusCode,
+      errorCode: details.code,
+      errorType: details.type,
+      providerRequestId: details.providerRequestId,
+      conversationId,
+      messageId,
+      enableWebSearch,
+      enableThinking,
+      enableImageGeneration,
+      historyLength: history.length,
+      partialContentChars: content.length,
+      thinkingChars: thinkingContent.length,
+    });
+
     apiCallLogs.push({
       provider: model.provider,
       modelId: model.id,
-      statusCode: 500,
+      statusCode,
       latencyMs,
       errorMessage: rawError,
     });
@@ -1769,6 +1800,67 @@ async function streamFromProvider(
       error: userFacingError,
     };
   }
+}
+
+// Compact failure summary so the route-level "all providers failed" line
+// is self-contained in Vercel's log viewer. Full stacks live in the
+// per-attempt "Provider stream failed" lines, correlated by `requestId`.
+function summarizeFailedCalls(apiCallLogs: ApiCallLogEntry[]): Array<{
+  provider: string;
+  modelId: string;
+  statusCode: number;
+  latencyMs: number;
+  errorMessage?: string;
+}> {
+  return apiCallLogs
+    .filter((c) => c.statusCode >= 400)
+    .map(({ provider, modelId, statusCode, latencyMs, errorMessage }) => ({
+      provider,
+      modelId,
+      statusCode,
+      latencyMs,
+      errorMessage,
+    }));
+}
+
+// Pull SDK-specific fields (OpenAI/Anthropic expose `status`, `code`,
+// `type`, `request_id` either at the top level or under `.error`) so
+// Vercel logs can filter on them. Stack/name/message come via the logger.
+function extractProviderErrorDetails(err: unknown): {
+  status?: number;
+  code?: string | number;
+  type?: string;
+  providerRequestId?: string;
+} {
+  if (!err || typeof err !== "object") return {};
+  const e = err as {
+    status?: unknown;
+    code?: unknown;
+    type?: unknown;
+    request_id?: unknown;
+    requestId?: unknown;
+    error?: { code?: unknown; type?: unknown; message?: unknown } | null;
+  };
+  const status = typeof e.status === "number" ? e.status : undefined;
+  const code =
+    typeof e.code === "string" || typeof e.code === "number"
+      ? e.code
+      : typeof e.error?.code === "string" || typeof e.error?.code === "number"
+        ? (e.error.code as string | number)
+        : undefined;
+  const type =
+    typeof e.type === "string"
+      ? e.type
+      : typeof e.error?.type === "string"
+        ? (e.error.type as string)
+        : undefined;
+  const providerRequestId =
+    typeof e.request_id === "string"
+      ? e.request_id
+      : typeof e.requestId === "string"
+        ? e.requestId
+        : undefined;
+  return { status, code, type, providerRequestId };
 }
 
 /**

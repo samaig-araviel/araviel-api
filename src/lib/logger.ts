@@ -31,9 +31,12 @@ interface SerializedError {
   name: string;
   message: string;
   stack?: string;
-  code?: string;
+  code?: string | number;
   status?: number;
-  cause?: unknown;
+  type?: string;
+  param?: string;
+  providerRequestId?: string;
+  cause?: SerializedError | unknown;
 }
 
 const IS_TEST = process.env.NODE_ENV === "test";
@@ -51,21 +54,36 @@ function shouldLog(level: LogLevel): boolean {
   return LEVEL_WEIGHT[level] >= LEVEL_WEIGHT[LOG_LEVEL];
 }
 
-function serializeError(err: unknown): SerializedError | undefined {
+function serializeError(err: unknown, depth = 0): SerializedError | undefined {
   if (!err) return undefined;
   if (err instanceof Error) {
-    const errWithExtras = err as Error & {
-      code?: string;
+    const e = err as Error & {
+      code?: string | number;
       status?: number;
+      type?: string;
+      param?: string | null;
+      request_id?: string;
+      requestId?: string;
       cause?: unknown;
     };
+    // Recurse once so wrapped SDK errors surface their underlying message
+    // instead of serializing to `{}`. Depth-capped to avoid loops.
+    const cause =
+      depth >= 1
+        ? e.cause
+        : e.cause instanceof Error
+          ? serializeError(e.cause, depth + 1)
+          : e.cause;
     return {
       name: err.name,
       message: err.message,
       stack: err.stack,
-      code: errWithExtras.code,
-      status: errWithExtras.status,
-      cause: errWithExtras.cause,
+      code: e.code,
+      status: e.status,
+      type: e.type,
+      param: e.param ?? undefined,
+      providerRequestId: e.request_id ?? e.requestId,
+      cause,
     };
   }
   return {
