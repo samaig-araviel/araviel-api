@@ -10,6 +10,7 @@ import type {
   DBSubConversation,
   ImageAttachment,
   ModelInfo,
+  SystemPromptParts,
   TokenUsage,
 } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
@@ -632,6 +633,101 @@ export async function getUserSettingsForChat(userId: string): Promise<UserSettin
   };
 }
 
+/**
+ * Structured form of the system prompt for caching-aware providers
+ * (currently Anthropic). Splits the prompt at the stable / variable
+ * boundary so the provider can place a cache breakpoint on the stable
+ * block.
+ *
+ * Compared to `buildSystemPrompt`, this moves title instructions out of
+ * the prepended position and into the `variable` block. The directive
+ * wording inside `getTitleInstructions()` already pins the `<araviel_title>`
+ * output to the start of the response regardless of where the instruction
+ * appears in the prompt, so model behavior is preserved.
+ *
+ * For caching to work, the `stable` output must be byte-identical across
+ * requests that share the same flags. Do not interpolate timestamps,
+ * UUIDs, or any other volatile data into the helpers that feed it.
+ */
+export function buildSystemPromptParts(
+  projectInstructions?: string,
+  options?: {
+    includeFileInstructions?: boolean;
+    includeTitleInstructions?: boolean;
+    userSettings?: UserSettingsForPrompt | null;
+  }
+): SystemPromptParts {
+  const basePrompt = [
+    "You are a helpful AI assistant powered by Araviel, an intelligent AI platform.",
+    "Provide clear, accurate, and well-structured responses.",
+    "Do not use emojis in your responses. Keep your tone professional and clean.",
+    "Be concise but thorough. If you are unsure about something, say so.",
+  ].join(" ");
+
+  let stable = `${basePrompt}\n\n${getFormattingInstructions()}\n\n${getChartInstructions()}`;
+  stable += `\n\n${getRichBlockInstructions()}`;
+  stable += `\n\n${getArtifactInstructions()}`;
+  if (options?.includeFileInstructions) {
+    stable += `\n\n${getFileBlockInstructions()}`;
+  }
+  stable += `\n\n${getFollowUpInstructions()}`;
+
+  const variableParts: string[] = [];
+  if (options?.includeTitleInstructions) {
+    variableParts.push(getTitleInstructions());
+  }
+  if (projectInstructions && projectInstructions.trim()) {
+    variableParts.push(
+      `--- Project Instructions ---\nThe following instructions were set by the user for this project. Follow them for all responses in this conversation:\n\n${projectInstructions}`
+    );
+  }
+  const userPrefsBlock = renderUserPreferencesBlock(options?.userSettings);
+  if (userPrefsBlock) {
+    variableParts.push(userPrefsBlock);
+  }
+
+  return {
+    stable,
+    variable: variableParts.length > 0 ? variableParts.join("\n\n") : undefined,
+  };
+}
+
+/**
+ * Renders the "--- User Preferences ---" block from user settings, or
+ * returns `null` if no preference fields are set. Used by both
+ * `buildSystemPrompt` and `buildSystemPromptParts` so the user-prefs
+ * serialization stays consistent.
+ */
+function renderUserPreferencesBlock(us: UserSettingsForPrompt | null | undefined): string | null {
+  if (!us) return null;
+  const parts: string[] = [];
+  if (us.responseTone && us.responseTone !== "default") {
+    const toneInstructions: Record<string, string> = {
+      professional: "Respond in a polished, precise, and professional tone.",
+      friendly: "Respond in a warm, chatty, and approachable tone.",
+      candid: "Respond in a direct, encouraging, and straightforward tone. Be honest and get to the point.",
+      quirky: "Respond in a playful, imaginative, and creative tone. Be inventive with your language.",
+      efficient: "Respond concisely and plainly. Keep answers short, direct, and to the point.",
+      cynical: "Respond with a critical, skeptical, and sarcastic edge. Be blunt and unfiltered.",
+    };
+    parts.push(toneInstructions[us.responseTone] ?? `Respond in a ${us.responseTone} tone.`);
+  }
+  if (us.preferredLanguage && us.preferredLanguage !== "English") {
+    parts.push(`Respond in ${us.preferredLanguage}.`);
+  }
+  if (us.occupation) {
+    parts.push(`The user's occupation is: ${us.occupation}.`);
+  }
+  if (us.expertise) {
+    parts.push(`The user has expertise in: ${us.expertise}. Adjust technical depth accordingly.`);
+  }
+  if (us.customInstructions && us.customInstructions.trim()) {
+    parts.push(`The user has provided the following personal instructions. Follow them for all responses:\n\n${us.customInstructions}`);
+  }
+  if (parts.length === 0) return null;
+  return `--- User Preferences ---\n${parts.join("\n")}`;
+}
+
 export function buildSystemPrompt(
   projectInstructions?: string,
   options?: {
@@ -671,37 +767,9 @@ export function buildSystemPrompt(
   }
 
   // Inject user preferences into the system prompt
-  const us = options?.userSettings;
-  if (us) {
-    const parts: string[] = [];
-
-    if (us.responseTone && us.responseTone !== "default") {
-      const toneInstructions: Record<string, string> = {
-        professional: "Respond in a polished, precise, and professional tone.",
-        friendly: "Respond in a warm, chatty, and approachable tone.",
-        candid: "Respond in a direct, encouraging, and straightforward tone. Be honest and get to the point.",
-        quirky: "Respond in a playful, imaginative, and creative tone. Be inventive with your language.",
-        efficient: "Respond concisely and plainly. Keep answers short, direct, and to the point.",
-        cynical: "Respond with a critical, skeptical, and sarcastic edge. Be blunt and unfiltered.",
-      };
-      parts.push(toneInstructions[us.responseTone] ?? `Respond in a ${us.responseTone} tone.`);
-    }
-    if (us.preferredLanguage && us.preferredLanguage !== "English") {
-      parts.push(`Respond in ${us.preferredLanguage}.`);
-    }
-    if (us.occupation) {
-      parts.push(`The user's occupation is: ${us.occupation}.`);
-    }
-    if (us.expertise) {
-      parts.push(`The user has expertise in: ${us.expertise}. Adjust technical depth accordingly.`);
-    }
-    if (us.customInstructions && us.customInstructions.trim()) {
-      parts.push(`The user has provided the following personal instructions. Follow them for all responses:\n\n${us.customInstructions}`);
-    }
-
-    if (parts.length > 0) {
-      prompt += `\n\n--- User Preferences ---\n${parts.join("\n")}`;
-    }
+  const userPrefsBlock = renderUserPreferencesBlock(options?.userSettings);
+  if (userPrefsBlock) {
+    prompt += `\n\n${userPrefsBlock}`;
   }
 
   return prompt;

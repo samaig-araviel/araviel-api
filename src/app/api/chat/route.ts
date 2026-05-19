@@ -13,7 +13,7 @@ import {
 } from "@/lib/stream/title-parser";
 import { updateConversationTitleIfUnchanged } from "@/lib/conversation-title-updater";
 import { dedupeCitations } from "@/lib/citations";
-import type { SupportedProvider, StreamEvent, TokenUsage, ModelInfo, ADEResponse, ConversationMessage, ImageAttachment } from "@/lib/types";
+import type { SupportedProvider, StreamEvent, SystemPromptParts, TokenUsage, ModelInfo, ADEResponse, ConversationMessage, ImageAttachment } from "@/lib/types";
 import { SUPPORTED_PROVIDERS } from "@/lib/types";
 import { randomUUID } from "crypto";
 import {
@@ -28,6 +28,7 @@ import {
   getPreviousModelId,
   resolveModel,
   buildSystemPrompt,
+  buildSystemPromptParts,
   getUserSettingsForChat,
   detectFileIntent,
   getProjectInstructionsForConversation,
@@ -490,7 +491,22 @@ async function handleChat(
       userSettings,
     });
 
-    // Append deep research instructions when using a deep research model
+    // Structured form of the same prompt for caching-aware providers
+    // (Anthropic). Built from the same inputs as `systemPrompt`. Other
+    // providers ignore this and continue to use `systemPrompt`.
+    const systemPromptParts: SystemPromptParts = buildSystemPromptParts(
+      projectInstructions ?? undefined,
+      {
+        includeFileInstructions,
+        includeTitleInstructions,
+        userSettings,
+      }
+    );
+
+    // Append deep research instructions when using a deep research model.
+    // Deep research models are OpenAI-only today, so this does not affect
+    // `systemPromptParts` (which only feeds Anthropic). If Anthropic deep
+    // research is added in the future, append to both here.
     if (OPENAI_DEEP_RESEARCH_MODELS.has(model.id)) {
       systemPrompt += getDeepResearchInstructions();
     }
@@ -914,7 +930,9 @@ async function handleChat(
             conversationId,
             messageId,
             pendingImages,
-            chatReq.images
+            chatReq.images,
+            undefined, // titleContext — image backup path doesn't generate titles
+            systemPromptParts
           );
 
           if (backupResult.success) {
@@ -1011,7 +1029,8 @@ async function handleChat(
       messageId,
       pendingImages,
       chatReq.images,
-      titleContext
+      titleContext,
+      systemPromptParts
     );
 
     // 13. If primary failed, try backup
@@ -1073,7 +1092,8 @@ async function handleChat(
           messageId,
           pendingImages,
           chatReq.images,
-          titleContext
+          titleContext,
+          systemPromptParts
         );
 
         if (!backupResult.success) {
@@ -1397,7 +1417,8 @@ async function streamFromProvider(
   messageId?: string,
   pendingImages?: PendingImageMeta[],
   uploadedImages?: ImageAttachment[],
-  titleContext?: TitleContext
+  titleContext?: TitleContext,
+  systemPromptParts?: SystemPromptParts
 ): Promise<StreamResult> {
   const log = logger.child({ route: "chat", subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
@@ -1445,6 +1466,7 @@ async function streamFromProvider(
     const providerStream = provider.stream({
       modelId: model.id,
       systemPrompt,
+      systemPromptParts,
       messages: providerMessages,
       enableThinking,
       enableWebSearch,

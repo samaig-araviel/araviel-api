@@ -1,4 +1,4 @@
-import type { ConversationMessage, Citation, TokenUsage } from "@/lib/types";
+import type { ConversationMessage, Citation, SystemPromptParts, TokenUsage } from "@/lib/types";
 
 export interface ProviderStreamEvent {
   type: "delta" | "thinking" | "citations" | "tool_use" | "image_generation" | "research_status" | "done" | "error";
@@ -19,6 +19,12 @@ export interface ProviderStreamEvent {
 export interface ProviderConfig {
   modelId: string;
   systemPrompt: string;
+  /**
+   * Optional structured system prompt. When set, caching-aware providers
+   * use this instead of `systemPrompt` to place cache_control on the
+   * stable prefix. Other providers ignore it.
+   */
+  systemPromptParts?: SystemPromptParts;
   messages: ConversationMessage[];
   enableThinking: boolean;
   enableWebSearch: boolean;
