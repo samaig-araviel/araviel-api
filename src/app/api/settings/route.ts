@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { authenticateRequest, AuthError } from "@/lib/auth";
 import type { AuthenticatedUser } from "@/lib/auth";
+import { getUserSubscription } from "@/lib/subscription";
 import { corsHeaders, handleCorsOptions } from "../cors";
 
 const DEFAULT_SETTINGS = {
@@ -105,11 +106,20 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
-      .from("user_settings")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // Load settings and subscription in parallel so the client can hydrate
+    // tier from the same response that boots the app — removes the race
+    // window where consumers read `currentTier` before /api/subscription
+    // resolves.
+    const [settingsResult, subscription] = await Promise.all([
+      supabase
+        .from("user_settings")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      getUserSubscription(user.id),
+    ]);
+
+    const { data, error } = settingsResult;
 
     if (error) {
       return NextResponse.json(
@@ -122,7 +132,19 @@ export async function GET(request: NextRequest) {
       ? { ...DEFAULT_SETTINGS, ...data }
       : { ...DEFAULT_SETTINGS, user_id: user.id };
 
-    return NextResponse.json({ settings }, { headers: corsHeaders(origin) });
+    const subscriptionSummary = {
+      tier: subscription?.tier ?? "free",
+      status: subscription?.status ?? "active",
+      billingInterval: subscription?.billingInterval ?? null,
+      periodEnd: subscription?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+      firstMonth: subscription?.firstMonth ?? false,
+    };
+
+    return NextResponse.json(
+      { settings, subscription: subscriptionSummary },
+      { headers: corsHeaders(origin) }
+    );
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to get settings" },
