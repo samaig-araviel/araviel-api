@@ -209,6 +209,7 @@ export interface SSERoutingData {
   providerHint: ADEProviderHint | null;
   webSearchUsed: boolean;
   webSearchAutoDetected: boolean;
+  showThinking: boolean;
 }
 
 export interface SSEDoneData {

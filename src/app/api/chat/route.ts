@@ -422,6 +422,18 @@ async function handleChat(
       adeResponse.analysis
     );
 
+    // Decide whether the UI should reveal a "Thinking" timeline for this
+    // request. Quick prompts don't deserve one — Claude/Perplexity hide it
+    // unless deep reasoning is actually happening. Manual reasoning toggles
+    // always show it; otherwise the panel only appears for ADE-classified
+    // "demanding" prompts. The frontend keeps a safety net on the `thinking`
+    // SSE event so an unexpected reasoning chunk still reveals the panel.
+    const showThinking =
+      chatReq.extendedThinking === true ||
+      chatReq.deepResearch === true ||
+      chatReq.googleThinking === true ||
+      adeResponse.analysis.complexity === "demanding";
+
     // 11. Send routing event (messageId is known, but not persisted)
     await sendSSE(writer, encoder, {
       type: "routing",
@@ -443,6 +455,7 @@ async function handleChat(
         providerHint: adeResponse.providerHint ?? null,
         webSearchUsed: shouldUseWebSearch,
         webSearchAutoDetected,
+        showThinking,
       },
     });
 
