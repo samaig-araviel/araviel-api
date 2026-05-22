@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
     // tier from the same response that boots the app — removes the race
     // window where consumers read `currentTier` before /api/subscription
     // resolves.
-    const [settingsResult, subscription] = await Promise.all([
+    const [settingsResult, subscriptionResult] = await Promise.allSettled([
       supabase
         .from("user_settings")
         .select("*")
@@ -119,7 +119,15 @@ export async function GET(request: NextRequest) {
       getUserSubscription(user.id),
     ]);
 
-    const { data, error } = settingsResult;
+    if (settingsResult.status === "rejected") {
+      const reason = settingsResult.reason;
+      return NextResponse.json(
+        { error: reason instanceof Error ? reason.message : String(reason) },
+        { status: 500, headers: corsHeaders(origin) }
+      );
+    }
+
+    const { data, error } = settingsResult.value;
 
     if (error) {
       return NextResponse.json(
@@ -132,19 +140,25 @@ export async function GET(request: NextRequest) {
       ? { ...DEFAULT_SETTINGS, ...data }
       : { ...DEFAULT_SETTINGS, user_id: user.id };
 
-    const subscriptionSummary = {
-      tier: subscription?.tier ?? "free",
-      status: subscription?.status ?? "active",
-      billingInterval: subscription?.billingInterval ?? null,
-      periodEnd: subscription?.currentPeriodEnd ?? null,
-      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
-      firstMonth: subscription?.firstMonth ?? false,
-    };
+    // If the subscription lookup blew up, return settings without a
+    // subscription summary so the client keeps its last-known tier
+    // instead of being silently downgraded to "free" by a transient DB
+    // error. The dedicated /api/subscription endpoint still surfaces the
+    // failure to the client (and gets retried).
+    const responseBody: Record<string, unknown> = { settings };
+    if (subscriptionResult.status === "fulfilled") {
+      const subscription = subscriptionResult.value;
+      responseBody.subscription = {
+        tier: subscription?.tier ?? "free",
+        status: subscription?.status ?? "active",
+        billingInterval: subscription?.billingInterval ?? null,
+        periodEnd: subscription?.currentPeriodEnd ?? null,
+        cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+        firstMonth: subscription?.firstMonth ?? false,
+      };
+    }
 
-    return NextResponse.json(
-      { settings, subscription: subscriptionSummary },
-      { headers: corsHeaders(origin) }
-    );
+    return NextResponse.json(responseBody, { headers: corsHeaders(origin) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to get settings" },

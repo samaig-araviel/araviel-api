@@ -31,7 +31,11 @@ export interface TextCreditState {
 // ─── Subscription Queries ──────────────────────────────────────────────────
 
 /**
- * Get a user's subscription. Returns null if no row exists (treated as free).
+ * Get a user's subscription. Returns null only when no row exists for the
+ * user (a legitimate "user is on the free tier" state). Throws on actual
+ * DB errors so callers don't silently downgrade a paying user to free
+ * because of a transient Supabase hiccup.
+ *
  * Uses service role to bypass RLS (called from chat endpoint + webhooks).
  */
 export async function getUserSubscription(
@@ -39,13 +43,20 @@ export async function getUserSubscription(
 ): Promise<Subscription | null> {
   const sb = getSupabase();
 
+  // maybeSingle returns { data: null, error: null } when zero rows match,
+  // so a missing subscription row is no longer indistinguishable from a
+  // real database error.
   const { data, error } = await sb
     .from("subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    log.error("getUserSubscription failed", error, { userId });
+    throw new Error(`Failed to load subscription: ${error.message}`);
+  }
+  if (!data) return null;
 
   return {
     tier: data.tier,
@@ -108,18 +119,25 @@ export async function upsertSubscription(data: {
 }
 
 /**
- * Get the Stripe customer ID for a user, or null.
+ * Get the Stripe customer ID for a user, or null when no subscription row
+ * exists. Throws on real DB errors for the same reason as
+ * {@link getUserSubscription}.
  */
 export async function getStripeCustomerId(
   userId: string
 ): Promise<string | null> {
   const sb = getSupabase();
 
-  const { data } = await sb
+  const { data, error } = await sb
     .from("subscriptions")
     .select("stripe_customer_id")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
+
+  if (error) {
+    log.error("getStripeCustomerId failed", error, { userId });
+    throw new Error(`Failed to load stripe customer id: ${error.message}`);
+  }
 
   return data?.stripe_customer_id ?? null;
 }
