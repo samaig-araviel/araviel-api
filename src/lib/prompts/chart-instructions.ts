@@ -55,6 +55,7 @@ const VALUE_FORMAT_OPTIONS = [
 const CHART_RULES = [
   "IMPORTANT: Always lead with a thorough, well-written text analysis first. Charts are supplementary visual aids, not the primary response.",
   "Only include a chart when the data genuinely benefits from visualization — do not default to charts for every question.",
+  "Do NOT emit chart blocks for weather, forecast, or temperature data — present those as prose plus a simple markdown table; the frontend renders weather responses with a dedicated visualization.",
   "Place charts AFTER your text analysis, not before it. The text should be the core of the response.",
   "Always include real or representative data — never generate an empty chart.",
   "Use area with gradientFill: true as the default for single-series financial time data (stock prices, index performance).",
