@@ -26,6 +26,7 @@ import {
   saveApiCallLog,
   fetchConversationHistory,
   getPreviousModelId,
+  getPreviousAssistantWebSearchUsed,
   resolveModel,
   buildSystemPrompt,
   buildSystemPromptParts,
@@ -425,12 +426,20 @@ async function handleChat(
     // 9. Generate messageId in memory — no DB insert yet
     const messageId = randomUUID();
 
-    // 10. Resolve web search decision (user preference + ADE analysis +
-    // a prompt-level frontstop for real-time tells ADE may miss).
+    // 10. Resolve web search decision: user preference, ADE analysis, a
+    // prompt-level frontstop for real-time tells ADE may miss, and a
+    // conversation-level inheritance so short follow-ups in an already-
+    // live-data chat ("hourly table for Maidstone") keep the search on.
+    // Skip the inheritance lookup for brand-new conversations — there's
+    // nothing to inherit and the DB roundtrip would be wasted.
+    const previousAssistantUsedSearch = isNewConversation
+      ? false
+      : await getPreviousAssistantWebSearchUsed(conversationId);
     const { shouldUseWebSearch, webSearchAutoDetected } = resolveWebSearch(
       chatReq.webSearch,
       adeResponse.analysis,
-      chatReq.message
+      chatReq.message,
+      previousAssistantUsedSearch
     );
 
     // Decide whether the UI should reveal a "Thinking" timeline for this

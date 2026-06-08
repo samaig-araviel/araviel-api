@@ -654,6 +654,34 @@ export async function getLocationMetadataConsent(userId: string): Promise<boolea
 }
 
 /**
+ * Did the previous assistant turn in this conversation use web search?
+ *
+ * Used by `resolveWebSearch` so a short follow-up like "hourly table for
+ * Maidstone" inherits the search context from the prior weather answer
+ * even when the words alone don't betray a real-time intent. Returns
+ * false for new conversations, missing rows, or query errors — the
+ * conservative default that costs nothing on uncertainty.
+ */
+export async function getPreviousAssistantWebSearchUsed(
+  conversationId: string
+): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("messages")
+    .select("model_used")
+    .eq("conversation_id", conversationId)
+    .eq("role", "assistant")
+    .is("sub_conversation_id", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  const modelUsed = data.model_used as { webSearchUsed?: boolean } | null;
+  return modelUsed?.webSearchUsed === true;
+}
+
+/**
  * Structured form of the system prompt for caching-aware providers
  * (currently Anthropic). Splits the prompt at the stable / variable
  * boundary so the provider can place a cache breakpoint on the stable
@@ -1213,7 +1241,8 @@ export async function getProjectInstructionsForConversation(
 export function resolveWebSearch(
   userWebSearch: boolean | undefined,
   analysis: ADEResponse["analysis"],
-  prompt?: string
+  prompt?: string,
+  previousAssistantUsedSearch?: boolean
 ): { shouldUseWebSearch: boolean; webSearchAutoDetected: boolean } {
   // User explicitly toggled web search on
   if (userWebSearch === true) {
@@ -1226,12 +1255,16 @@ export function resolveWebSearch(
   }
 
   // Auto mode: trust ADE's webSearchRequired flag, fall back to intent-based
-  // detection, and finally a prompt-level frontstop for real-time tells that
-  // ADE may misclassify (weather, news, prices, scores). Top-tier products
-  // never blindly trust the router for obvious time-sensitive queries.
+  // detection, then a prompt-level frontstop for real-time tells that ADE
+  // may misclassify (weather, news, prices, scores), and finally inherit
+  // from the previous assistant turn for short follow-ups in a conversation
+  // that's already been about live data. Top-tier products never blindly
+  // trust the router for obvious time-sensitive queries.
   const adeRecommends = analysis.webSearchRequired ?? detectWebSearchFromIntent(analysis);
   const promptIsTimeSensitive = prompt ? detectTimeSensitivePrompt(prompt) : false;
-  const autoDetected = adeRecommends || promptIsTimeSensitive;
+  const inheritsFromPrevious =
+    previousAssistantUsedSearch === true && isLikelyFollowUp(prompt);
+  const autoDetected = adeRecommends || promptIsTimeSensitive || inheritsFromPrevious;
   return { shouldUseWebSearch: autoDetected, webSearchAutoDetected: autoDetected };
 }
 
@@ -1286,6 +1319,19 @@ export function detectTimeSensitivePrompt(prompt: string): boolean {
   if (trimmed.length === 0 || trimmed.length > 500) return false;
   if (trimmed.includes("```")) return false;
   return TIME_SENSITIVE_PATTERNS.some((re) => re.test(trimmed));
+}
+
+// Short, fenced-code-free prompts are almost always follow-up questions
+// that belong to the conversation's current topic. Longer prompts tend to
+// be self-contained new requests and should be classified on their own
+// merits — we don't want a 400-character coding question to inherit web
+// search from an earlier weather chat.
+function isLikelyFollowUp(prompt: string | undefined): boolean {
+  if (!prompt) return false;
+  const trimmed = prompt.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) return false;
+  if (trimmed.includes("```")) return false;
+  return true;
 }
 
 export function shouldEnableThinking(analysis: ADEResponse["analysis"]): boolean {
