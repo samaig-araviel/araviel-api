@@ -30,6 +30,7 @@ import {
   buildSystemPrompt,
   buildSystemPromptParts,
   getUserSettingsForChat,
+  getLocationMetadataConsent,
   detectFileIntent,
   getProjectInstructionsForConversation,
   resolveWebSearch,
@@ -318,7 +319,12 @@ async function handleChat(
 
     const strategy = STRATEGY_MAP[chatReq.autoStrategy ?? "default"] ?? "auto";
 
-    // Build humanContext when mood/tone/weather are available
+    // Build humanContext when mood/tone/weather are available.
+    //
+    // Weather is location-derived, so it sits behind the user's "Location
+    // metadata" privacy toggle. The client gates this on its end, but we
+    // re-check server-side as the authoritative consent boundary — a stale
+    // or tampered client must never leak location-derived data to the model.
     let humanContext: { emotionalState?: { mood?: string }; environmentalContext?: { weather?: string }; preferences?: { tone?: string } } | undefined;
 
     if (chatReq.mood || chatReq.weather || chatReq.tone) {
@@ -327,7 +333,10 @@ async function handleChat(
         humanContext.emotionalState = { mood: chatReq.mood };
       }
       if (chatReq.weather) {
-        humanContext.environmentalContext = { weather: chatReq.weather };
+        const hasLocationConsent = await getLocationMetadataConsent(user.id);
+        if (hasLocationConsent) {
+          humanContext.environmentalContext = { weather: chatReq.weather };
+        }
       }
       if (chatReq.tone) {
         humanContext.preferences = { tone: chatReq.tone };

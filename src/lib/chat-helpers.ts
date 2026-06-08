@@ -634,6 +634,26 @@ export async function getUserSettingsForChat(userId: string): Promise<UserSettin
 }
 
 /**
+ * Read the user's "Location metadata" consent flag from Settings >
+ * Data & privacy. Used by the chat route to drop location-derived fields
+ * (e.g. weather) before they reach the model when the user has opted out.
+ *
+ * Defaults to `false` (privacy-by-default) on missing row or query error —
+ * never grant access on uncertainty.
+ */
+export async function getLocationMetadataConsent(userId: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("location_metadata")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  return data.location_metadata === true;
+}
+
+/**
  * Structured form of the system prompt for caching-aware providers
  * (currently Anthropic). Splits the prompt at the stable / variable
  * boundary so the provider can place a cache breakpoint on the stable
