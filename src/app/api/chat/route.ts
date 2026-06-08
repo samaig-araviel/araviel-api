@@ -425,10 +425,12 @@ async function handleChat(
     // 9. Generate messageId in memory — no DB insert yet
     const messageId = randomUUID();
 
-    // 10. Resolve web search decision (user preference + ADE analysis)
+    // 10. Resolve web search decision (user preference + ADE analysis +
+    // a prompt-level frontstop for real-time tells ADE may miss).
     const { shouldUseWebSearch, webSearchAutoDetected } = resolveWebSearch(
       chatReq.webSearch,
-      adeResponse.analysis
+      adeResponse.analysis,
+      chatReq.message
     );
 
     // Decide whether the UI should reveal a "Thinking" timeline for this

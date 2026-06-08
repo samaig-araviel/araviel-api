@@ -6,6 +6,7 @@ import {
   canModelGenerateImages,
   getImageCapableModels,
   resolveWebSearch,
+  detectTimeSensitivePrompt,
   shouldEnableThinking,
   resolveThinking,
   applyThinkingProviderOverride,
@@ -384,6 +385,61 @@ describe("resolveWebSearch", () => {
     const result = resolveWebSearch(undefined, analysis);
     expect(result.shouldUseWebSearch).toBe(false);
     expect(result.webSearchAutoDetected).toBe(false);
+  });
+
+  it("auto-detects time-sensitive prompts ADE missed", () => {
+    const result = resolveWebSearch(undefined, baseAnalysis, "london weather");
+    expect(result.shouldUseWebSearch).toBe(true);
+    expect(result.webSearchAutoDetected).toBe(true);
+  });
+
+  it("does not override an explicit user opt-out", () => {
+    const result = resolveWebSearch(false, baseAnalysis, "weather in tokyo");
+    expect(result.shouldUseWebSearch).toBe(false);
+    expect(result.webSearchAutoDetected).toBe(false);
+  });
+});
+
+// ─── detectTimeSensitivePrompt ────────────────────────────────────────────────
+
+describe("detectTimeSensitivePrompt", () => {
+  it("matches weather queries", () => {
+    expect(detectTimeSensitivePrompt("london weather")).toBe(true);
+    expect(detectTimeSensitivePrompt("What's the weather in Tokyo?")).toBe(true);
+    expect(detectTimeSensitivePrompt("weekly forecast for Berlin")).toBe(true);
+  });
+
+  it("matches news queries", () => {
+    expect(detectTimeSensitivePrompt("breaking news")).toBe(true);
+    expect(detectTimeSensitivePrompt("latest news on the election")).toBe(true);
+    expect(detectTimeSensitivePrompt("show me the headlines")).toBe(true);
+  });
+
+  it("matches finance queries", () => {
+    expect(detectTimeSensitivePrompt("AAPL stock price")).toBe(true);
+    expect(detectTimeSensitivePrompt("bitcoin price right now")).toBe(true);
+    expect(detectTimeSensitivePrompt("USD to EUR exchange rate")).toBe(true);
+  });
+
+  it("matches live-result queries", () => {
+    expect(detectTimeSensitivePrompt("who won the game last night")).toBe(true);
+    expect(detectTimeSensitivePrompt("final score of the Lakers game")).toBe(true);
+  });
+
+  it("ignores prompts with fenced code blocks", () => {
+    const prompt = "Debug this weather widget:\n```js\nconst w = getWeather();\n```";
+    expect(detectTimeSensitivePrompt(prompt)).toBe(false);
+  });
+
+  it("ignores very long prompts likely to be code or discussion", () => {
+    const prompt = "weather " + "x".repeat(600);
+    expect(detectTimeSensitivePrompt(prompt)).toBe(false);
+  });
+
+  it("ignores unrelated prompts", () => {
+    expect(detectTimeSensitivePrompt("how do I sort a list in python")).toBe(false);
+    expect(detectTimeSensitivePrompt("write a haiku about autumn")).toBe(false);
+    expect(detectTimeSensitivePrompt("")).toBe(false);
   });
 });
 
