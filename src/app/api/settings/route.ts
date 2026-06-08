@@ -20,9 +20,7 @@ const DEFAULT_SETTINGS = {
   web_search_default: "auto",
   image_quality_default: "standard",
   enable_follow_ups: true,
-  save_history: true,
   enable_analytics: true,
-  ai_data_retention: false,
   location_metadata: false,
   notify_new_features: true,
   notify_usage_limits: true,
@@ -50,9 +48,7 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
   webSearchDefault: "web_search_default",
   imageQualityDefault: "image_quality_default",
   enableFollowUps: "enable_follow_ups",
-  saveHistory: "save_history",
   enableAnalytics: "enable_analytics",
-  aiDataRetention: "ai_data_retention",
   locationMetadata: "location_metadata",
   notifyNewFeatures: "notify_new_features",
   notifyUsageLimits: "notify_usage_limits",
@@ -66,8 +62,10 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
 
 // Whitelist of settings the API will accept. Anything outside this set is
 // dropped on write so old clients sending retired columns (font_size,
-// compact_mode, show_code_line_numbers, show_model_info, notify_sounds)
-// can't poison the row.
+// compact_mode, show_code_line_numbers, show_model_info, notify_sounds,
+// save_history, ai_data_retention) can't poison the row. The retired
+// columns themselves stay in the DB for forward compatibility — easy to
+// reintroduce the corresponding settings when the gating logic is ready.
 const ALLOWED_COLUMNS = new Set(Object.values(CAMEL_TO_SNAKE));
 
 function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {

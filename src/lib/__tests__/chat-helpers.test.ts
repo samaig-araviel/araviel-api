@@ -398,6 +398,33 @@ describe("resolveWebSearch", () => {
     expect(result.shouldUseWebSearch).toBe(false);
     expect(result.webSearchAutoDetected).toBe(false);
   });
+
+  it("inherits web search for a short follow-up in a live-data conversation", () => {
+    const result = resolveWebSearch(
+      undefined,
+      baseAnalysis,
+      "Hourly table for Maidstone",
+      true
+    );
+    expect(result.shouldUseWebSearch).toBe(true);
+    expect(result.webSearchAutoDetected).toBe(true);
+  });
+
+  it("does not inherit for long prompts (likely a new topic)", () => {
+    const longPrompt =
+      "Explain in detail how transformer attention works, including the math, " +
+      "the role of query/key/value matrices, and why scaled dot-product attention " +
+      "matters in practice when training large language models.";
+    const result = resolveWebSearch(undefined, baseAnalysis, longPrompt, true);
+    expect(result.shouldUseWebSearch).toBe(false);
+    expect(result.webSearchAutoDetected).toBe(false);
+  });
+
+  it("does not inherit when the previous turn did not use search", () => {
+    const result = resolveWebSearch(undefined, baseAnalysis, "and Birmingham?", false);
+    expect(result.shouldUseWebSearch).toBe(false);
+    expect(result.webSearchAutoDetected).toBe(false);
+  });
 });
 
 // ─── detectTimeSensitivePrompt ────────────────────────────────────────────────
