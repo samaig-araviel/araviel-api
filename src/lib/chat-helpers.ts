@@ -1212,7 +1212,8 @@ export async function getProjectInstructionsForConversation(
 
 export function resolveWebSearch(
   userWebSearch: boolean | undefined,
-  analysis: ADEResponse["analysis"]
+  analysis: ADEResponse["analysis"],
+  prompt?: string
 ): { shouldUseWebSearch: boolean; webSearchAutoDetected: boolean } {
   // User explicitly toggled web search on
   if (userWebSearch === true) {
@@ -1224,9 +1225,14 @@ export function resolveWebSearch(
     return { shouldUseWebSearch: false, webSearchAutoDetected: false };
   }
 
-  // Auto mode: check ADE's webSearchRequired, fall back to intent-based detection
+  // Auto mode: trust ADE's webSearchRequired flag, fall back to intent-based
+  // detection, and finally a prompt-level frontstop for real-time tells that
+  // ADE may misclassify (weather, news, prices, scores). Top-tier products
+  // never blindly trust the router for obvious time-sensitive queries.
   const adeRecommends = analysis.webSearchRequired ?? detectWebSearchFromIntent(analysis);
-  return { shouldUseWebSearch: adeRecommends, webSearchAutoDetected: adeRecommends };
+  const promptIsTimeSensitive = prompt ? detectTimeSensitivePrompt(prompt) : false;
+  const autoDetected = adeRecommends || promptIsTimeSensitive;
+  return { shouldUseWebSearch: autoDetected, webSearchAutoDetected: autoDetected };
 }
 
 function detectWebSearchFromIntent(analysis: ADEResponse["analysis"]): boolean {
@@ -1239,6 +1245,47 @@ function detectWebSearchFromIntent(analysis: ADEResponse["analysis"]): boolean {
     "information_retrieval",
   ]);
   return searchIntents.has(analysis.intent);
+}
+
+// High-precision patterns for prompts that overwhelmingly need live data.
+// Kept narrow on purpose — false positives just pay an unneeded search,
+// but missing weather/news/prices means the model fabricates or refuses.
+const TIME_SENSITIVE_PATTERNS: RegExp[] = [
+  // Weather
+  /\bweather\b/i,
+  /\bforecast\b/i,
+  /\btemperature\s+(?:in|for|today|tonight|now|right\s+now|currently)\b/i,
+
+  // News / current events
+  /\b(?:breaking|latest|today'?s?)\s+news\b/i,
+  /\bnews\s+(?:today|right\s+now|now|currently)\b/i,
+  /\bheadlines?\b/i,
+
+  // Finance
+  /\b(?:stock|share)\s+price\b/i,
+  /\bexchange\s+rate\b/i,
+  /\bprice\s+of\s+(?:bitcoin|ethereum|btc|eth|sol|doge|crypto)\b/i,
+  /\b(?:bitcoin|ethereum|btc|eth)\s+price\b/i,
+  /\bcrypto(?:currency)?\s+price\b/i,
+
+  // Sports / live results
+  /\bwho\s+(?:won|is\s+winning|'s\s+winning)\b/i,
+  /\b(?:final|live|current)\s+score\b/i,
+];
+
+/**
+ * Heuristic that catches real-time prompts ADE may misclassify.
+ *
+ * Long prompts and prompts containing fenced code are skipped so a
+ * coding question about a weather app or a finance dashboard tutorial
+ * doesn't trigger an unwanted search.
+ */
+export function detectTimeSensitivePrompt(prompt: string): boolean {
+  if (!prompt) return false;
+  const trimmed = prompt.trim();
+  if (trimmed.length === 0 || trimmed.length > 500) return false;
+  if (trimmed.includes("```")) return false;
+  return TIME_SENSITIVE_PATTERNS.some((re) => re.test(trimmed));
 }
 
 export function shouldEnableThinking(analysis: ADEResponse["analysis"]): boolean {
