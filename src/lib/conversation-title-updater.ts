@@ -40,6 +40,7 @@ export async function updateConversationTitleIfUnchanged(
       .update({ title: newTitle })
       .eq("id", conversationId)
       .eq("title", expectedTitle)
+      .is("deleted_at", null)
       .select("id");
 
     if (error) {

@@ -31,6 +31,7 @@ export async function GET(
       .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .eq("id", id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (error || !data) {
@@ -111,6 +112,7 @@ export async function PATCH(
       .update(updates)
       .eq("id", id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .single();
 
@@ -163,12 +165,12 @@ export async function DELETE(
     const { id } = await params;
     const supabase = getSupabase();
 
-    // Verify ownership before deleting
     const { data: owned, error: ownErr } = await supabase
       .from("conversations")
       .select("id")
       .eq("id", id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (ownErr || !owned) {

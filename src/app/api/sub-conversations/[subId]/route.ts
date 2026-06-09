@@ -47,6 +47,7 @@ export async function DELETE(
       .select("id")
       .eq("id", subConv.conversation_id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (convErr || !conv) {
@@ -126,6 +127,7 @@ export async function PATCH(
       .select("id")
       .eq("id", subConvCheck.conversation_id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (convCheckErr || !convCheck) {

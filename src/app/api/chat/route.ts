@@ -177,7 +177,8 @@ async function handleChat(
       const { data: convos } = await sb
         .from("conversations")
         .select("id")
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .is("deleted_at", null);
       const convoIds = (convos ?? []).map((c: { id: string }) => c.id);
 
       let guestMessageCount = 0;
