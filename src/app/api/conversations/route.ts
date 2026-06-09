@@ -36,13 +36,15 @@ export async function GET(request: NextRequest) {
       .from("conversations")
       .select("id, title, created_at, updated_at, project_id, is_starred, is_archived, is_reported")
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
     let countQuery = supabase
       .from("conversations")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .is("deleted_at", null);
 
     if (projectId) {
       dataQuery = dataQuery.eq("project_id", projectId);
@@ -97,6 +99,57 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500, headers: corsHeaders(request.headers.get("origin")) }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const origin = request.headers.get("origin");
+
+  let user: AuthenticatedUser;
+  try {
+    user = await authenticateRequest(request);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status, headers: corsHeaders(origin) });
+    }
+    throw err;
+  }
+
+  const { searchParams } = new URL(request.url);
+  const scope = searchParams.get("scope");
+  if (scope !== "all") {
+    return NextResponse.json(
+      { error: "Missing or invalid scope. Use ?scope=all to soft-delete every conversation." },
+      { status: 400, headers: corsHeaders(origin) }
+    );
+  }
+
+  try {
+    const supabase = getSupabase();
+    const now = new Date().toISOString();
+
+    const { count, error } = await supabase
+      .from("conversations")
+      .update({ deleted_at: now }, { count: "exact" })
+      .eq("user_id", user.id)
+      .is("deleted_at", null);
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500, headers: corsHeaders(origin) }
+      );
+    }
+
+    return NextResponse.json(
+      { trashed: count ?? 0 },
+      { headers: corsHeaders(origin) }
+    );
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500, headers: corsHeaders(origin) }
     );
   }
 }

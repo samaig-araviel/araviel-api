@@ -202,11 +202,11 @@ export async function GET(
 
     const shareRow = share as DBSharedConversationRow;
 
-    // Reported conversations must not be viewable via their share link.
     const { data: conversation } = await supabase
       .from("conversations")
       .select("id, title, created_at, is_reported")
       .eq("id", shareRow.conversation_id)
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (!conversation || (conversation as DBConversationRow).is_reported) {

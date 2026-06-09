@@ -137,7 +137,8 @@ export async function getOrCreateConversation(
     let query = supabase
       .from("conversations")
       .select("id")
-      .eq("id", conversationId);
+      .eq("id", conversationId)
+      .is("deleted_at", null);
 
     if (userId) {
       query = query.eq("user_id", userId);
@@ -257,7 +258,8 @@ export async function updateConversationTimestamp(
   await supabase
     .from("conversations")
     .update({ updated_at: new Date().toISOString() })
-    .eq("id", conversationId);
+    .eq("id", conversationId)
+    .is("deleted_at", null);
 }
 
 export async function saveRoutingLog(
@@ -1219,6 +1221,7 @@ export async function getProjectInstructionsForConversation(
     .from("conversations")
     .select("project_id")
     .eq("id", conversationId)
+    .is("deleted_at", null)
     .single();
 
   if (convError || !conversation?.project_id) {

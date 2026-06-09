@@ -130,6 +130,7 @@ export async function GET(
       .select("id")
       .eq("id", subConv.conversation_id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (convErr || !conv) {

@@ -35,6 +35,7 @@ export async function POST(
       .select("id")
       .eq("id", conversationId)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .single();
 
     if (convErr || !conv) {
