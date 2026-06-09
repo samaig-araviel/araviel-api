@@ -23,22 +23,34 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(Math.max(parseInt(searchParams.get("limit") ?? "15", 10), 1), 100);
+    const offset = Math.max(parseInt(searchParams.get("offset") ?? "0", 10), 0);
+
     const supabase = getSupabase();
     const graceDays = getConversationTrashGraceDays();
-    const cutoffMs = Date.now() - graceDays * 24 * 60 * 60 * 1000;
+    const cutoffIso = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
-      .from("conversations")
-      .select("id, title, created_at, updated_at, project_id, deleted_at")
-      .eq("user_id", user.id)
-      .not("deleted_at", "is", null)
-      .gte("deleted_at", new Date(cutoffMs).toISOString())
-      .order("deleted_at", { ascending: false })
-      .limit(200);
+    const [{ data, error }, { count, error: countError }] = await Promise.all([
+      supabase
+        .from("conversations")
+        .select("id, title, created_at, updated_at, project_id, deleted_at")
+        .eq("user_id", user.id)
+        .not("deleted_at", "is", null)
+        .gte("deleted_at", cutoffIso)
+        .order("deleted_at", { ascending: false })
+        .range(offset, offset + limit - 1),
+      supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .not("deleted_at", "is", null)
+        .gte("deleted_at", cutoffIso),
+    ]);
 
-    if (error) {
+    if (error || countError) {
       return NextResponse.json(
-        { error: error.message },
+        { error: (error ?? countError)?.message },
         { status: 500, headers: corsHeaders(origin) }
       );
     }
@@ -59,7 +71,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { conversations, graceDays },
+      { conversations, total: count ?? 0, graceDays },
       { headers: corsHeaders(origin) }
     );
   } catch (err) {
