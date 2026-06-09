@@ -246,6 +246,7 @@ export async function listConversations(filters: {
     .eq("user_id", userId)
     .is("deleted_at", null)
     .eq("is_archived", archived)
+    .order("updated_at", { ascending: false })
     .order("created_at", { ascending: false });
 
   if (provider) {
