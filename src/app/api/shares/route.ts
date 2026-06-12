@@ -19,6 +19,7 @@ interface DBSharedConversationListRow {
   snapshot_at: string;
   created_at: string;
   view_count: number;
+  conversations: { deleted_at: string | null } | { deleted_at: string | null }[] | null;
 }
 
 interface SharedConversationListItem {
@@ -50,11 +51,19 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
 
+    // Inner-join with conversations and filter out soft-deleted ones so the
+    // list never surfaces shares whose underlying conversation is gone (which
+    // would 404 silently when clicked). The CASCADE on shared_conversations
+    // already handles hard-deletes, but conversations sitting in Recently
+    // deleted still satisfy the FK — they need filtering at query time.
     const { data, error } = await supabase
       .from("shared_conversations")
-      .select("share_token, conversation_id, title_snapshot, snapshot_at, created_at, view_count")
+      .select(
+        "share_token, conversation_id, title_snapshot, snapshot_at, created_at, view_count, conversations!inner(deleted_at)"
+      )
       .eq("user_id", user.id)
       .is("revoked_at", null)
+      .is("conversations.deleted_at", null)
       .order("created_at", { ascending: false });
 
     if (error) {
