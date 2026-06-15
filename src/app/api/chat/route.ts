@@ -52,6 +52,7 @@ import {
   RESEARCH_MODE_LABELS,
 } from "@/lib/thinking-models";
 import { generateImage } from "@/lib/providers/image";
+import { synthesizeImagePrompt } from "@/lib/image-prompt-synthesis";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
 import type { CreditBalance, ChargeResult } from "@/lib/credits";
@@ -526,6 +527,10 @@ async function handleChat(
       }
     }
 
+    const effectiveImagePrompt = enableImageGeneration
+      ? await synthesizeImagePrompt({ history, userMessage: chatReq.message })
+      : chatReq.message;
+
     const includeFileInstructions = detectFileIntent(chatReq.message);
     // Only ask the model to emit an <araviel_title> block when this is a
     // brand-new conversation with a real (non-sub) id. For text-mode chats on
@@ -588,7 +593,7 @@ async function handleChat(
     if (enableImageGeneration && isImageGenerationModel(model.id)) {
       const start = Date.now();
       try {
-        const imageResult = await generateImage(model.provider, model.id, chatReq.message, imageQuality as import("@/lib/providers/image").ImageQuality);
+        const imageResult = await generateImage(model.provider, model.id, effectiveImagePrompt, imageQuality as import("@/lib/providers/image").ImageQuality);
         const latencyMs = Date.now() - start;
 
         apiCallLogs.push({
@@ -610,7 +615,7 @@ async function handleChat(
           imageId = stored.id;
           pendingImages.push({
             id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
-            prompt: chatReq.message, model: model.name, provider: model.provider,
+            prompt: effectiveImagePrompt, model: model.name, provider: model.provider,
             size: imageResult.size, style: imageResult.style,
           });
         } catch (uploadErr) {
@@ -626,7 +631,7 @@ async function handleChat(
               provider: model.provider,
               conversationId,
               messageId,
-              prompt: chatReq.message,
+              prompt: effectiveImagePrompt,
             });
             if (!chargeResult.charged) {
               await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
@@ -646,7 +651,7 @@ async function handleChat(
           type: "image_generation",
           data: {
             url: imageUrl,
-            prompt: chatReq.message,
+            prompt: effectiveImagePrompt,
             model: model.name,
             provider: model.provider,
             size: imageResult.size ?? "1024x1024",
@@ -657,7 +662,7 @@ async function handleChat(
         });
 
         // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-        const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${imageUrl})`;
+        const markdownContent = `![Generated image: ${effectiveImagePrompt.slice(0, 100)}](${imageUrl})`;
 
         const imageStreamResult: StreamResult = {
           success: true,
@@ -719,7 +724,7 @@ async function handleChat(
 
           const backupStart = Date.now();
           try {
-            const backupImageResult = await generateImage(backup.provider, backup.id, chatReq.message, imageQuality as import("@/lib/providers/image").ImageQuality);
+            const backupImageResult = await generateImage(backup.provider, backup.id, effectiveImagePrompt, imageQuality as import("@/lib/providers/image").ImageQuality);
             const backupLatencyMs = Date.now() - backupStart;
 
             apiCallLogs.push({
@@ -741,7 +746,7 @@ async function handleChat(
               backupImageId = stored.id;
               pendingImages.push({
                 id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
-                prompt: chatReq.message, model: backup.name, provider: backup.provider,
+                prompt: effectiveImagePrompt, model: backup.name, provider: backup.provider,
                 size: backupImageResult.size, style: backupImageResult.style,
               });
             } catch (uploadErr) {
@@ -756,7 +761,7 @@ async function handleChat(
                   provider: backup.provider,
                   conversationId,
                   messageId,
-                  prompt: chatReq.message,
+                  prompt: effectiveImagePrompt,
                 });
                 if (!chargeResult.charged) {
                   await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
@@ -776,7 +781,7 @@ async function handleChat(
               type: "image_generation",
               data: {
                 url: backupImageUrl,
-                prompt: chatReq.message,
+                prompt: effectiveImagePrompt,
                 model: backup.name,
                 provider: backup.provider,
                 size: backupImageResult.size ?? "1024x1024",
@@ -787,7 +792,7 @@ async function handleChat(
             });
 
             // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${backupImageUrl})`;
+            const markdownContent = `![Generated image: ${effectiveImagePrompt.slice(0, 100)}](${backupImageUrl})`;
 
             const backupStreamResult: StreamResult = {
               success: true,
@@ -870,7 +875,7 @@ async function handleChat(
           // Backup is a dedicated image model — use image generation API
           const start = Date.now();
           try {
-            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, chatReq.message, imageQuality as import("@/lib/providers/image").ImageQuality);
+            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, effectiveImagePrompt, imageQuality as import("@/lib/providers/image").ImageQuality);
             const latencyMs = Date.now() - start;
 
             apiCallLogs.push({
@@ -892,7 +897,7 @@ async function handleChat(
               fbImageId = stored.id;
               pendingImages.push({
                 id: stored.id, storagePath: stored.storagePath, publicUrl: stored.publicUrl,
-                prompt: chatReq.message, model: imageBackup.name, provider: imageBackup.provider,
+                prompt: effectiveImagePrompt, model: imageBackup.name, provider: imageBackup.provider,
                 size: imageResult.size, style: imageResult.style,
               });
             } catch (uploadErr) {
@@ -907,7 +912,7 @@ async function handleChat(
                   provider: imageBackup.provider,
                   conversationId,
                   messageId,
-                  prompt: chatReq.message,
+                  prompt: effectiveImagePrompt,
                 });
                 if (!chargeResult.charged) {
                   await sendSSE(writer, encoder, { type: "error", data: { message: "Insufficient image credits", code: "INSUFFICIENT_CREDITS" } });
@@ -927,7 +932,7 @@ async function handleChat(
               type: "image_generation",
               data: {
                 url: fbImageUrl,
-                prompt: chatReq.message,
+                prompt: effectiveImagePrompt,
                 model: imageBackup.name,
                 provider: imageBackup.provider,
                 size: imageResult.size ?? "1024x1024",
@@ -938,7 +943,7 @@ async function handleChat(
             });
 
             // Store reference in content for database persistence (not sent as delta to avoid duplicate rendering)
-            const markdownContent = `![Generated image: ${chatReq.message.slice(0, 100)}](${fbImageUrl})`;
+            const markdownContent = `![Generated image: ${effectiveImagePrompt.slice(0, 100)}](${fbImageUrl})`;
 
             const imageStreamResult: StreamResult = {
               success: true,
@@ -986,7 +991,7 @@ async function handleChat(
             enableWebSearch,
             enableThinking,
             true, // enableImageGeneration
-            chatReq.message,
+            effectiveImagePrompt,
             writer,
             encoder,
             apiCallLogs,
@@ -1023,7 +1028,7 @@ async function handleChat(
 
       // No image-capable backup in ADE alternates — auto-fallback to dedicated image model
       const dedicatedFallback = await tryDedicatedImageFallback(
-        chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
+        effectiveImagePrompt, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
       );
       if (dedicatedFallback) {
         await finalize(
@@ -1085,7 +1090,7 @@ async function handleChat(
       enableWebSearch,
       enableThinking,
       enableImageGeneration,
-      chatReq.message,
+      effectiveImagePrompt,
       writer,
       encoder,
       apiCallLogs,
@@ -1155,7 +1160,7 @@ async function handleChat(
           enableWebSearch,
           backupEnableThinking,
           enableImageGeneration,
-          chatReq.message,
+          effectiveImagePrompt,
           writer,
           encoder,
           apiCallLogs,
@@ -1172,7 +1177,7 @@ async function handleChat(
           // If image generation was requested, try a dedicated image model as last resort
           if (enableImageGeneration) {
             const dedicatedFallback = await tryDedicatedImageFallback(
-              chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
+              effectiveImagePrompt, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
             );
             if (dedicatedFallback) {
               await finalize(
@@ -1224,7 +1229,7 @@ async function handleChat(
         // No backup model — if image gen was requested, try a dedicated image model
         if (enableImageGeneration) {
           const dedicatedFallback = await tryDedicatedImageFallback(
-            chatReq.message, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
+            effectiveImagePrompt, model, apiCallLogs, writer, encoder, conversationId, messageId, pendingImages, creditInfo
           );
           if (dedicatedFallback) {
             await finalize(
