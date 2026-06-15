@@ -46,15 +46,15 @@ describe("validateChatRequest", () => {
     expect(() => validateChatRequest({})).toThrow("message is required");
   });
 
-  it("throws for empty message", () => {
+  it("throws for empty message with no images", () => {
     expect(() => validateChatRequest({ message: "" })).toThrow(
-      "message is required"
+      "message is required when no images are attached"
     );
   });
 
-  it("throws for whitespace-only message", () => {
+  it("throws for whitespace-only message with no images", () => {
     expect(() => validateChatRequest({ message: "   " })).toThrow(
-      "message is required"
+      "message is required when no images are attached"
     );
   });
 
@@ -62,6 +62,35 @@ describe("validateChatRequest", () => {
     expect(() => validateChatRequest({ message: 123 })).toThrow(
       "message is required"
     );
+  });
+
+  it("accepts an empty message when images are attached", () => {
+    const result = validateChatRequest({
+      message: "",
+      images: [
+        {
+          dataUri: "data:image/jpeg;base64,/9j/AAAA",
+          mimeType: "image/jpeg",
+          fileName: "a.jpg",
+        },
+      ],
+    });
+    expect(result.message).toBe("");
+    expect(result.images).toHaveLength(1);
+  });
+
+  it("accepts a whitespace-only message when images are attached", () => {
+    const result = validateChatRequest({
+      message: "   ",
+      images: [
+        {
+          dataUri: "data:image/png;base64,iVBORw0KAAAA",
+          mimeType: "image/png",
+        },
+      ],
+    });
+    expect(result.message).toBe("");
+    expect(result.images).toHaveLength(1);
   });
 
   it("parses optional string fields", () => {

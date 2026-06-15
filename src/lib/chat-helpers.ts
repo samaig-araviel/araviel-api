@@ -32,8 +32,14 @@ export function validateChatRequest(body: unknown): ChatRequest {
 
   const req = body as Record<string, unknown>;
 
-  if (!req.message || typeof req.message !== "string" || req.message.trim() === "") {
-    throw new Error("message is required and must be a non-empty string");
+  if (typeof req.message !== "string") {
+    throw new Error("message is required and must be a string");
+  }
+
+  const messageIsEmpty = req.message.trim() === "";
+  const hasImages = Array.isArray(req.images) && req.images.length > 0;
+  if (messageIsEmpty && !hasImages) {
+    throw new Error("message is required when no images are attached");
   }
 
   let importedConversationId: string | undefined;

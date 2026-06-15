@@ -237,6 +237,20 @@ async function handleChat(
       }
     }
 
+    // Image-only requests have an empty `message`; derive non-empty fallbacks
+    // for the conversation title and ADE routing prompt so downstream calls
+    // that expect prompt text still work, while the saved message preserves
+    // the user's original empty content alongside the image attachments.
+    const messageIsEmpty = chatReq.message.length === 0;
+    const hasUploadedImagesEarly = !!chatReq.images && chatReq.images.length > 0;
+    const titleFallback = hasUploadedImagesEarly
+      ? chatReq.images![0]?.fileName?.trim() || "Image upload"
+      : "";
+    const conversationTitleSource = messageIsEmpty ? titleFallback : chatReq.message;
+    const routingPrompt = messageIsEmpty
+      ? "Describe the attached image."
+      : chatReq.message;
+
     // 2. Get or create conversation (for sub-conversations, validate and use the parent conversation)
     let conversationId: string;
     let isNewConversation = false;
@@ -249,7 +263,7 @@ async function handleChat(
     } else {
       const resolved = await getOrCreateConversation(
         chatReq.conversationId,
-        chatReq.message,
+        conversationTitleSource,
         chatReq.projectId,
         user.id
       );
@@ -355,7 +369,7 @@ async function handleChat(
     const conversationHasImages = chatReq.conversationHasImages || hasUploadedImages || false;
 
     const { response: adeResponse, latencyMs: adeLatencyMs } = await callADE({
-      prompt: chatReq.message,
+      prompt: routingPrompt,
       modality: adeModality,
       userTier: serverTier,
       availableProviders,
@@ -486,9 +500,12 @@ async function handleChat(
       getUserSettingsForChat(user.id),
     ]);
 
-    // 13. Determine if image generation is needed
+    // 13. Determine if image generation is needed. An empty user message
+    // can never be a generation prompt, so suppress the generation path even
+    // if the intent classifier or modality flag tries to fire it.
     const enableImageGeneration =
-      adeResponse.analysis.intent === "image_generation" || chatReq.modality === "image";
+      !messageIsEmpty &&
+      (adeResponse.analysis.intent === "image_generation" || chatReq.modality === "image");
 
     // 13b. Credit check for image generation
     const imageQuality = chatReq.imageQuality ?? "standard";
