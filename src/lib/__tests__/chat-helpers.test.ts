@@ -15,6 +15,7 @@ import {
   findSupportedBackup,
   buildSystemPromptParts,
   pruneOrphanUserMessages,
+  attachImagesFromLastUserMessage,
 } from "@/lib/chat-helpers";
 import type { ADEResponse, ADEModelResult, ModelInfo } from "@/lib/types";
 
@@ -1116,5 +1117,86 @@ describe("pruneOrphanUserMessages", () => {
       { role: "user" as const, content: "u2-current" },
     ];
     expect(pruneOrphanUserMessages(conv)).toEqual(conv);
+  });
+});
+
+describe("attachImagesFromLastUserMessage", () => {
+  const image = {
+    dataUri: "data:image/jpeg;base64,AAAA",
+    mimeType: "image/jpeg",
+    fileName: "a.jpg",
+  };
+
+  it("attaches images to the most recent user message that originally carried them", () => {
+    const messages = [
+      { role: "user" as const, content: "first" },
+      { role: "assistant" as const, content: "ok" },
+      { role: "user" as const, content: "look at this" },
+    ];
+    const rows = [
+      { role: "user", content: "first", attachments: null },
+      { role: "assistant", content: "ok", attachments: null },
+      { role: "user", content: "look at this", attachments: [image] },
+    ];
+    attachImagesFromLastUserMessage(messages, rows);
+    expect(messages[2].images).toEqual([image]);
+    expect(messages[0].images).toBeUndefined();
+  });
+
+  it("substitutes a placeholder for an earlier image-only user message whose images were stripped", () => {
+    const messages = [
+      { role: "user" as const, content: "" },
+      { role: "assistant" as const, content: "Sure, what next?" },
+      { role: "user" as const, content: "now compare with this" },
+    ];
+    const rows = [
+      { role: "user", content: "", attachments: [image] },
+      { role: "assistant", content: "Sure, what next?", attachments: null },
+      { role: "user", content: "now compare with this", attachments: [image] },
+    ];
+    attachImagesFromLastUserMessage(messages, rows);
+    expect(messages[2].images).toEqual([image]);
+    expect(messages[0].images).toBeUndefined();
+    expect(messages[0].content).toBe("[image]");
+  });
+
+  it("pluralizes the placeholder when the earlier message had multiple images", () => {
+    const messages = [
+      { role: "user" as const, content: "  " },
+      { role: "user" as const, content: "next" },
+    ];
+    const rows = [
+      { role: "user", content: "  ", attachments: [image, image, image] },
+      { role: "user", content: "next", attachments: [image] },
+    ];
+    attachImagesFromLastUserMessage(messages, rows);
+    expect(messages[0].content).toBe("[3 images]");
+  });
+
+  it("leaves earlier image-carrying user messages alone when they already have text", () => {
+    const messages = [
+      { role: "user" as const, content: "Original prompt with text" },
+      { role: "user" as const, content: "next" },
+    ];
+    const rows = [
+      { role: "user", content: "Original prompt with text", attachments: [image] },
+      { role: "user", content: "next", attachments: [image] },
+    ];
+    attachImagesFromLastUserMessage(messages, rows);
+    expect(messages[0].content).toBe("Original prompt with text");
+  });
+
+  it("is a no-op when no user message carried attachments", () => {
+    const messages = [
+      { role: "user" as const, content: "hi" },
+      { role: "assistant" as const, content: "hello" },
+    ];
+    const rows = [
+      { role: "user", content: "hi", attachments: null },
+      { role: "assistant", content: "hello", attachments: null },
+    ];
+    attachImagesFromLastUserMessage(messages, rows);
+    expect(messages[0].images).toBeUndefined();
+    expect(messages[0].content).toBe("hi");
   });
 });

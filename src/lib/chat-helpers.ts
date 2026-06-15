@@ -411,19 +411,38 @@ export function pruneOrphanUserMessages(
  * Find the last user message in the fetched DB rows that has attachments,
  * and populate its `images` field on the corresponding ConversationMessage.
  * Only the most recent user message with images is populated to avoid
- * resending old images to the provider (saves tokens).
+ * resending old images to the provider (saves tokens). Earlier user
+ * messages that originally carried attachments are given a short textual
+ * placeholder so the provider never receives an empty-content user turn —
+ * Anthropic rejects those with `messages.X: user messages must have
+ * non-empty content`.
  */
-function attachImagesFromLastUserMessage(
+export function attachImagesFromLastUserMessage(
   messages: ConversationMessage[],
   dbRows: Array<Pick<DBMessage, "role" | "content" | "attachments">>
 ): void {
+  let attachedIdx = -1;
   for (let i = dbRows.length - 1; i >= 0; i--) {
     const row = dbRows[i]!;
     if (row.role !== "user" || !row.attachments) continue;
     const attachments = row.attachments as ImageAttachment[];
     if (!Array.isArray(attachments) || attachments.length === 0) continue;
     messages[i]!.images = attachments;
+    attachedIdx = i;
     break;
+  }
+
+  for (let i = 0; i < dbRows.length; i++) {
+    if (i === attachedIdx) continue;
+    const row = dbRows[i]!;
+    if (row.role !== "user") continue;
+    const attachments = row.attachments as ImageAttachment[] | null | undefined;
+    const hadAttachments = Array.isArray(attachments) && attachments.length > 0;
+    if (!hadAttachments) continue;
+    const msg = messages[i]!;
+    if (!msg.content || msg.content.trim() === "") {
+      msg.content = attachments.length > 1 ? `[${attachments.length} images]` : "[image]";
+    }
   }
 }
 
