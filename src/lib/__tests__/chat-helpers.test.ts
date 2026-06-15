@@ -14,6 +14,7 @@ import {
   detectFileIntent,
   findSupportedBackup,
   buildSystemPromptParts,
+  pruneOrphanUserMessages,
 } from "@/lib/chat-helpers";
 import type { ADEResponse, ADEModelResult, ModelInfo } from "@/lib/types";
 
@@ -1050,5 +1051,70 @@ describe("buildSystemPromptParts", () => {
     expect(titleIdx).toBeGreaterThanOrEqual(0);
     expect(projectIdx).toBeGreaterThan(titleIdx);
     expect(prefsIdx).toBeGreaterThan(projectIdx);
+  });
+});
+
+describe("pruneOrphanUserMessages", () => {
+  it("returns the input unchanged when there are 0 or 1 messages", () => {
+    expect(pruneOrphanUserMessages([])).toEqual([]);
+    expect(pruneOrphanUserMessages([{ role: "user", content: "only" }])).toEqual([
+      { role: "user", content: "only" },
+    ]);
+  });
+
+  it("keeps a clean alternating conversation intact", () => {
+    const conv = [
+      { role: "user" as const, content: "u1" },
+      { role: "assistant" as const, content: "a1" },
+      { role: "user" as const, content: "u2" },
+      { role: "assistant" as const, content: "a2" },
+    ];
+    expect(pruneOrphanUserMessages(conv)).toEqual(conv);
+  });
+
+  it("drops a user message immediately followed by another user message", () => {
+    const conv = [
+      { role: "user" as const, content: "u1" },
+      { role: "assistant" as const, content: "a1" },
+      { role: "user" as const, content: "u2-failed" },
+      { role: "user" as const, content: "u3-current" },
+    ];
+    expect(pruneOrphanUserMessages(conv)).toEqual([
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "u3-current" },
+    ]);
+  });
+
+  it("drops multiple consecutive orphan user messages but keeps the last", () => {
+    const conv = [
+      { role: "user" as const, content: "u1-failed" },
+      { role: "user" as const, content: "u2-failed" },
+      { role: "user" as const, content: "u3-current" },
+    ];
+    expect(pruneOrphanUserMessages(conv)).toEqual([
+      { role: "user", content: "u3-current" },
+    ]);
+  });
+
+  it("keeps a system message that precedes orphan user messages", () => {
+    const conv = [
+      { role: "system" as const, content: "context" },
+      { role: "user" as const, content: "u1-failed" },
+      { role: "user" as const, content: "u2-current" },
+    ];
+    expect(pruneOrphanUserMessages(conv)).toEqual([
+      { role: "system", content: "context" },
+      { role: "user", content: "u2-current" },
+    ]);
+  });
+
+  it("does not drop a trailing user message that has no follower", () => {
+    const conv = [
+      { role: "user" as const, content: "u1" },
+      { role: "assistant" as const, content: "a1" },
+      { role: "user" as const, content: "u2-current" },
+    ];
+    expect(pruneOrphanUserMessages(conv)).toEqual(conv);
   });
 });

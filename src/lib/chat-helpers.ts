@@ -358,7 +358,7 @@ export async function fetchConversationHistory(
     // Attach images from the last user message only (avoids resending old images to providers)
     attachImagesFromLastUserMessage(messages, data ?? []);
 
-    return [...contextMessages, ...messages];
+    return pruneOrphanUserMessages([...contextMessages, ...messages]);
   }
 
   // Main conversation: exclude sub-conversation messages
@@ -382,7 +382,29 @@ export async function fetchConversationHistory(
   // Attach images from the last user message only
   attachImagesFromLastUserMessage(messages, data ?? []);
 
-  return messages;
+  return pruneOrphanUserMessages(messages);
+}
+
+/**
+ * Drop user messages that are immediately followed by another user message.
+ * Those are previous turns where the assistant never produced a saved reply
+ * (the request failed before the done event), so leaving them in the history
+ * sent to the provider would create back-to-back user turns and confuse the
+ * model. The most recent user message — the current request — is always
+ * kept because nothing follows it yet.
+ */
+export function pruneOrphanUserMessages(
+  messages: ConversationMessage[]
+): ConversationMessage[] {
+  if (messages.length <= 1) return messages;
+  const pruned: ConversationMessage[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const current = messages[i]!;
+    const next = messages[i + 1];
+    if (current.role === "user" && next && next.role === "user") continue;
+    pruned.push(current);
+  }
+  return pruned;
 }
 
 /**
