@@ -27,14 +27,18 @@ const LEVEL_RANK: Readonly<Record<GeminiThinkingLevel, number>> = {
  * Gemini 3.x supported `thinkingLevel` values vary by model. Sending an
  * unsupported level returns a 400 from the API, so we restrict per-model:
  *   - Gemini 3 Pro: only `low` and `high`
- *   - Gemini 3 Flash: `minimal`, `low`, `medium`, `high`
+ *   - Gemini 3.x Flash and Flash-Lite: `minimal`, `low`, `medium`, `high`
  *   - Other 3.x (e.g. 3.1 Pro): `low`, `medium`, `high`
  */
 function getAllowedThinkingLevels(modelId: string): readonly GeminiThinkingLevel[] {
   if (modelId === "gemini-3-pro" || modelId.startsWith("gemini-3-pro-")) {
     return ["low", "high"];
   }
-  if (modelId.startsWith("gemini-3-flash") || modelId.startsWith("gemini-3.1-flash")) {
+  if (
+    modelId.startsWith("gemini-3-flash") ||
+    modelId.startsWith("gemini-3.1-flash") ||
+    modelId.startsWith("gemini-3.5-flash")
+  ) {
     return ["minimal", "low", "medium", "high"];
   }
   return ["low", "medium", "high"];
