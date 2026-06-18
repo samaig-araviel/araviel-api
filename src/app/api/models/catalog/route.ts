@@ -42,6 +42,11 @@ function isFresh(entry: CacheEntry | null): entry is CacheEntry {
   return entry !== null && entry.expiresAt > Date.now();
 }
 
+function isAvailable(model: unknown): boolean {
+  if (typeof model !== "object" || model === null) return false;
+  return (model as { available?: boolean }).available !== false;
+}
+
 async function fetchCatalogFromAde(): Promise<CatalogPayload> {
   const baseUrl = process.env.ADE_BASE_URL ?? "https://ade-sandy.vercel.app";
   const url = `${baseUrl}/api/v1/models`;
@@ -60,7 +65,9 @@ async function fetchCatalogFromAde(): Promise<CatalogPayload> {
   if (!Array.isArray(body.models)) {
     throw new Error("ADE /api/v1/models returned a malformed body");
   }
-  return body;
+
+  const visible = body.models.filter(isAvailable);
+  return { models: visible, count: visible.length };
 }
 
 async function refresh(): Promise<CatalogPayload> {

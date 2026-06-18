@@ -11,6 +11,7 @@ export type ThinkingTargetProvider = "anthropic" | "openai" | "google";
 
 /** Anthropic Claude models that accept any form of the `thinking` parameter. */
 export const ANTHROPIC_THINKING_MODELS: ReadonlySet<string> = new Set([
+  "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-sonnet-4-6",
   "claude-sonnet-4-5-20250929",
@@ -23,6 +24,7 @@ export const ANTHROPIC_THINKING_MODELS: ReadonlySet<string> = new Set([
  * `budget_tokens` shape). Opus 4.7 rejects `budget_tokens` entirely.
  */
 export const ANTHROPIC_ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
+  "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
@@ -31,11 +33,14 @@ export const ANTHROPIC_ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
 /**
  * OpenAI models purpose-built for deep research. They use a non-streaming
  * background-polling path with mandatory `web_search_preview` and require a
- * separate system-prompt suffix.
+ * separate system-prompt suffix. GPT-5.5 Pro is included because the provider
+ * does not support streaming for that SKU — background polling is the
+ * recommended call shape per OpenAI's docs.
  */
 export const OPENAI_DEEP_RESEARCH_MODELS: ReadonlySet<string> = new Set([
   "o3-deep-research",
   "o4-mini-deep-research",
+  "gpt-5.5-pro",
 ]);
 
 /**

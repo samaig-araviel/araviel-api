@@ -5,8 +5,12 @@ interface ModelPricing {
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
   // OpenAI — current
+  "gpt-5.5": { inputPerMillion: 5, outputPerMillion: 30 },
+  "gpt-5.5-pro": { inputPerMillion: 30, outputPerMillion: 180 },
   "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15 },
   "gpt-5.4-pro": { inputPerMillion: 30, outputPerMillion: 180 },
+  "gpt-5.4-mini": { inputPerMillion: 0.75, outputPerMillion: 4.5 },
+  "gpt-5.4-nano": { inputPerMillion: 0.2, outputPerMillion: 1.25 },
   "gpt-5.2": { inputPerMillion: 1.75, outputPerMillion: 14 },
   "gpt-5.2-pro": { inputPerMillion: 21, outputPerMillion: 168 },
   "gpt-5.1": { inputPerMillion: 1.25, outputPerMillion: 10 },
@@ -36,6 +40,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "sora-2": { inputPerMillion: 15, outputPerMillion: 60 }, // retired 2026-09-24
 
   // Anthropic
+  "claude-opus-4-8": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-7": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-6": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-5-20251101": { inputPerMillion: 5, outputPerMillion: 25 },
@@ -47,6 +52,8 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-3-5-haiku-20241022": { inputPerMillion: 0.8, outputPerMillion: 4 },
 
   // Google Gemini
+  "gemini-3.5-flash": { inputPerMillion: 1.5, outputPerMillion: 9 },
+  "gemini-3.1-flash-lite": { inputPerMillion: 0.25, outputPerMillion: 1.5 },
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-pro-preview-05-06": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-flash": { inputPerMillion: 0.075, outputPerMillion: 0.3 },

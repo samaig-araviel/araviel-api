@@ -18,12 +18,15 @@ const IMAGE_GEN_TOOL_MODELS = new Set([
   // GPT-4.1 series
   "gpt-4.1",
   "gpt-4.1-mini",
-  // GPT-5 series (gpt-5-mini explicitly does NOT support image_generation)
+  // GPT-5 series (gpt-5-mini and gpt-5.4-mini explicitly do NOT support image_generation)
   "gpt-5",
   "gpt-5.2",
   "gpt-5.4",
   "gpt-5.4-pro",
+  "gpt-5.4-nano",
   "gpt-5-nano",
+  "gpt-5.5",
+  "gpt-5.5-pro",
   // o-series (only o3 supports image_generation)
   "o3",
 ]);
