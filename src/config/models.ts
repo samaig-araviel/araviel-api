@@ -56,10 +56,10 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gemini-3.1-flash-lite": { inputPerMillion: 0.25, outputPerMillion: 1.5 },
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-pro-preview-05-06": { inputPerMillion: 1.25, outputPerMillion: 10 },
-  "gemini-2.5-flash": { inputPerMillion: 0.075, outputPerMillion: 0.3 },
-  "gemini-2.5-flash-preview-04-17": { inputPerMillion: 0.075, outputPerMillion: 0.3 },
-  "gemini-2.5-flash-lite": { inputPerMillion: 0.025, outputPerMillion: 0.1 },
-  "gemini-2.5-flash-lite-preview-06-17": { inputPerMillion: 0.025, outputPerMillion: 0.1 },
+  "gemini-2.5-flash": { inputPerMillion: 0.3, outputPerMillion: 2.5 },
+  "gemini-2.5-flash-preview-04-17": { inputPerMillion: 0.3, outputPerMillion: 2.5 },
+  "gemini-2.5-flash-lite": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
+  "gemini-2.5-flash-lite-preview-06-17": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
 
   // Perplexity
   "sonar": { inputPerMillion: 1, outputPerMillion: 1 },
