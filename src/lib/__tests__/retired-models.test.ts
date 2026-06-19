@@ -26,6 +26,12 @@ describe("coerceModelId", () => {
     expect(coerceModelId("gpt-image-1")).toBe("gpt-image-2");
   });
 
+  it("maps the Claude Opus 4.1 family to claude-opus-4-7", () => {
+    expect(coerceModelId("claude-opus-4-1")).toBe("claude-opus-4-7");
+    expect(coerceModelId("claude-opus-4-1-20250805")).toBe("claude-opus-4-7");
+    expect(coerceModelId("claude-opus-4-1-20250610")).toBe("claude-opus-4-7");
+  });
+
   it("throws RetiredModelError for sora-2 (no replacement)", () => {
     expect(() => coerceModelId("sora-2")).toThrow(RetiredModelError);
     expect(() => coerceModelId("sora-2-pro")).toThrow(RetiredModelError);
