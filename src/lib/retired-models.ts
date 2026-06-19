@@ -34,6 +34,11 @@ export const RETIRED_MODELS: Readonly<Record<string, string | null>> = Object.fr
 
   // Claude Haiku 3.5 — retired from Anthropic-direct API; alive on Bedrock/Vertex
   "claude-3-5-haiku-20241022": "claude-haiku-4-5-20251001",
+
+  // Claude Opus 4.1 — deprecated 2026-06-05, retiring 2026-08-05
+  "claude-opus-4-1": "claude-opus-4-7",
+  "claude-opus-4-1-20250805": "claude-opus-4-7",
+  "claude-opus-4-1-20250610": "claude-opus-4-7",
 });
 
 /**
