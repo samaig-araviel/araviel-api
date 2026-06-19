@@ -5,6 +5,7 @@ interface ModelPricing {
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
   // OpenAI — current
+  "gpt-realtime": { inputPerMillion: 40, outputPerMillion: 80 },
   "gpt-5.5": { inputPerMillion: 5, outputPerMillion: 30 },
   "gpt-5.5-pro": { inputPerMillion: 30, outputPerMillion: 180 },
   "gpt-5.4": { inputPerMillion: 2.5, outputPerMillion: 15 },
@@ -52,6 +53,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-3-5-haiku-20241022": { inputPerMillion: 0.8, outputPerMillion: 4 },
 
   // Google Gemini
+  "gemini-3.1-pro-preview": { inputPerMillion: 2, outputPerMillion: 12 },
   "gemini-3.5-flash": { inputPerMillion: 1.5, outputPerMillion: 9 },
   "gemini-3.1-flash-lite": { inputPerMillion: 0.25, outputPerMillion: 1.5 },
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
@@ -61,12 +63,17 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gemini-2.5-flash-lite": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
   "gemini-2.5-flash-lite-preview-06-17": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
 
+  // xAI
+  "grok-4": { inputPerMillion: 3, outputPerMillion: 15 },
+  "grok-4-fast": { inputPerMillion: 0.5, outputPerMillion: 2 },
+  "grok-4.1-fast": { inputPerMillion: 0.5, outputPerMillion: 2 },
+
   // Perplexity
   "sonar": { inputPerMillion: 1, outputPerMillion: 1 },
   "sonar-pro": { inputPerMillion: 3, outputPerMillion: 15 },
 
   // Image generation models — current
-  "gpt-image-2": { inputPerMillion: 5, outputPerMillion: 30 },
+  "gpt-image-2": { inputPerMillion: 8, outputPerMillion: 30 },
   "gpt-image-1.5": { inputPerMillion: 0, outputPerMillion: 34 },
   "gpt-image-1-mini": { inputPerMillion: 0, outputPerMillion: 8 },
   "imagen-4": { inputPerMillion: 40, outputPerMillion: 60 },
@@ -78,6 +85,7 @@ const PROVIDER_DEFAULTS: Record<string, ModelPricing> = {
   openai: { inputPerMillion: 2, outputPerMillion: 8 },
   anthropic: { inputPerMillion: 3, outputPerMillion: 15 },
   google: { inputPerMillion: 1.25, outputPerMillion: 10 },
+  xai: { inputPerMillion: 3, outputPerMillion: 15 },
   perplexity: { inputPerMillion: 1, outputPerMillion: 1 },
   stability: { inputPerMillion: 30, outputPerMillion: 50 },
 };

@@ -694,7 +694,7 @@ describe("applyThinkingProviderOverride", () => {
     // thinking-capable Claude.
     const resolved = {
       model: makeModel("sonar", "perplexity"),
-      backupModels: [makeModel("claude-3-5-haiku-20241022", "anthropic")],
+      backupModels: [makeModel("claude-haiku-4-5-20251001", "anthropic")],
       isManualSelection: false,
     };
     const out = applyThinkingProviderOverride(
@@ -708,7 +708,7 @@ describe("applyThinkingProviderOverride", () => {
 
   it("escalates to default when the primary is the same provider but not thinking-capable", () => {
     const resolved = {
-      model: makeModel("claude-3-5-haiku-20241022", "anthropic"),
+      model: makeModel("claude-haiku-4-5-20251001", "anthropic"),
       backupModels: [],
       isManualSelection: false,
     };
@@ -861,11 +861,11 @@ describe("findThinkingAwareBackup", () => {
 
   it("behaves like findSupportedBackup when no toggle is set", () => {
     const backups = [
-      makeModel("claude-3-5-haiku-20241022", "anthropic"),
+      makeModel("claude-haiku-4-5-20251001", "anthropic"),
       makeModel("gpt-5.2", "openai"),
     ];
     const result = findThinkingAwareBackup(backups, {}, allProviders);
-    expect(result?.backup.id).toBe("claude-3-5-haiku-20241022");
+    expect(result?.backup.id).toBe("claude-haiku-4-5-20251001");
     expect(result?.modeHonored).toBe(true);
     expect(result?.downgradedFrom).toBeNull();
   });
@@ -890,7 +890,7 @@ describe("findThinkingAwareBackup", () => {
     // would silently disable the toggle, so the helper falls through to any
     // supported backup and reports the downgrade.
     const backups = [
-      makeModel("claude-3-5-haiku-20241022", "anthropic"),
+      makeModel("claude-haiku-4-5-20251001", "anthropic"),
       makeModel("gpt-5.2", "openai"),
     ];
     const result = findThinkingAwareBackup(
@@ -898,7 +898,7 @@ describe("findThinkingAwareBackup", () => {
       { extendedThinking: true },
       allProviders
     );
-    expect(result?.backup.id).toBe("claude-3-5-haiku-20241022");
+    expect(result?.backup.id).toBe("claude-haiku-4-5-20251001");
     expect(result?.modeHonored).toBe(false);
     expect(result?.downgradedFrom).toBe("anthropic");
   });

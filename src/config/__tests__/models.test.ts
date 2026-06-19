@@ -47,7 +47,7 @@ describe("getModelPricing", () => {
 
     it("returns correct pricing for gpt-image-2", () => {
       const pricing = getModelPricing("gpt-image-2", "openai");
-      expect(pricing.inputPerMillion).toBe(5);
+      expect(pricing.inputPerMillion).toBe(8);
       expect(pricing.outputPerMillion).toBe(30);
     });
 

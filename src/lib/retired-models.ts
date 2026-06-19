@@ -31,6 +31,9 @@ export const RETIRED_MODELS: Readonly<Record<string, string | null>> = Object.fr
   // Sora 2 / Videos API — shutdown 2026-09-24, no replacement
   "sora-2": null,
   "sora-2-pro": null,
+
+  // Claude Haiku 3.5 — retired from Anthropic-direct API; alive on Bedrock/Vertex
+  "claude-3-5-haiku-20241022": "claude-haiku-4-5-20251001",
 });
 
 /**
