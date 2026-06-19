@@ -57,6 +57,12 @@ describe("getModelPricing", () => {
       expect(pricing.outputPerMillion).toBe(34);
     });
 
+    it("returns correct pricing for gemini-3.1-flash-image (image output rate)", () => {
+      const pricing = getModelPricing("gemini-3.1-flash-image", "google");
+      expect(pricing.inputPerMillion).toBe(0.5);
+      expect(pricing.outputPerMillion).toBe(60);
+    });
+
     it("returns correct pricing for gpt-5.3-codex", () => {
       const pricing = getModelPricing("gpt-5.3-codex", "openai");
       expect(pricing.inputPerMillion).toBe(1.75);

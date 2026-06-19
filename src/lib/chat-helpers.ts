@@ -596,6 +596,7 @@ const NATIVE_IMAGE_GEN_MODELS = new Set([
   "o3",
   // Google — responseModalities (only -image model variants)
   "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
 ]);
@@ -650,7 +651,8 @@ export function getImageCapableModels(): {
       { id: "gpt-5.4", name: "GPT-5.4", provider: "OpenAI" },
       { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI" },
       { id: "gpt-4.1", name: "GPT-4.1", provider: "OpenAI" },
-      { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image", provider: "Google" },
+      { id: "gemini-3.1-flash-image", name: "Nano Banana 2", provider: "Google" },
+      { id: "gemini-2.5-flash-image", name: "Nano Banana", provider: "Google" },
     ],
   };
 }

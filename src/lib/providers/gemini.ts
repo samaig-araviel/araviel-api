@@ -87,6 +87,7 @@ function getThinkingLevel(complexity: string): GeminiThinkingLevel {
 /** Models that support native image generation via responseModalities. */
 const GEMINI_IMAGE_GEN_MODELS = new Set([
   "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
 ]);
