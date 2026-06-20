@@ -17,20 +17,25 @@ function mockClient(reply: string | (() => Promise<unknown>)): MockClient {
 describe("synthesizeImagePrompt", () => {
   const userMsg = "generate the image";
 
-  it("returns the synthesized prompt when the model responds", async () => {
+  it("returns the synthesized prompt + aspect ratio when the model responds", async () => {
     const history: ConversationMessage[] = [
       { role: "user", content: "Design a vertical Instagram flyer for Map Groups" },
       { role: "assistant", content: "Done. Title is bold, two QR cards, 1080x1350." },
       { role: "user", content: userMsg },
     ];
     const client = mockClient(
-      "A vertical Instagram flyer at 1080x1350 for Map Groups, bold sans-serif title, two QR cards left and right, modern minimalist composition."
+      JSON.stringify({
+        prompt:
+          "A vertical Instagram flyer at 1080x1350 for Map Groups, bold sans-serif title, two QR cards left and right, modern minimalist composition.",
+        aspectRatio: "9:16",
+      })
     );
 
     const result = await synthesizeImagePrompt({ history, userMessage: userMsg, client });
 
-    expect(result).toContain("Map Groups");
-    expect(result).toContain("1080x1350");
+    expect(result.prompt).toContain("Map Groups");
+    expect(result.prompt).toContain("1080x1350");
+    expect(result.aspectRatio).toBe("9:16");
     expect(client.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
@@ -39,7 +44,7 @@ describe("synthesizeImagePrompt", () => {
       role: (i % 2 === 0 ? "user" : "assistant") as ConversationMessage["role"],
       content: `turn-${i}`,
     }));
-    const client = mockClient("prompt");
+    const client = mockClient(JSON.stringify({ prompt: "prompt", aspectRatio: "1:1" }));
 
     await synthesizeImagePrompt({ history, userMessage: userMsg, client });
 
@@ -61,7 +66,7 @@ describe("synthesizeImagePrompt", () => {
       { role: "assistant", content: "Got it." },
       { role: "user", content: userMsg },
     ];
-    const client = mockClient("prompt");
+    const client = mockClient(JSON.stringify({ prompt: "prompt", aspectRatio: "1:1" }));
 
     await synthesizeImagePrompt({ history, userMessage: userMsg, client });
 
@@ -77,7 +82,32 @@ describe("synthesizeImagePrompt", () => {
       userMessage: userMsg,
       client,
     });
-    expect(result).toBe(userMsg);
+    expect(result.prompt).toBe(userMsg);
+    expect(result.aspectRatio).toBeUndefined();
+  });
+
+  it("falls back to the user message when the model returns unparseable JSON", async () => {
+    const client = mockClient("not json at all");
+    const result = await synthesizeImagePrompt({
+      history: [{ role: "user", content: userMsg }],
+      userMessage: userMsg,
+      client,
+    });
+    expect(result.prompt).toBe(userMsg);
+    expect(result.aspectRatio).toBeUndefined();
+  });
+
+  it("ignores an invalid aspectRatio value but keeps the prompt", async () => {
+    const client = mockClient(
+      JSON.stringify({ prompt: "polished prompt", aspectRatio: "5:7" })
+    );
+    const result = await synthesizeImagePrompt({
+      history: [{ role: "user", content: userMsg }],
+      userMessage: userMsg,
+      client,
+    });
+    expect(result.prompt).toBe("polished prompt");
+    expect(result.aspectRatio).toBeUndefined();
   });
 
   it("falls back to the user message when the model call throws", async () => {
@@ -89,7 +119,7 @@ describe("synthesizeImagePrompt", () => {
       userMessage: userMsg,
       client,
     });
-    expect(result).toBe(userMsg);
+    expect(result.prompt).toBe(userMsg);
   });
 
   it("falls back to the user message when no OpenAI client is available", async () => {
@@ -98,17 +128,19 @@ describe("synthesizeImagePrompt", () => {
       userMessage: userMsg,
       client: undefined,
     });
-    expect(result).toBe(userMsg);
+    expect(result.prompt).toBe(userMsg);
   });
 
   it("uses a non-history block when history is empty", async () => {
-    const client = mockClient("a polished standalone image prompt");
+    const client = mockClient(
+      JSON.stringify({ prompt: "a polished standalone image prompt", aspectRatio: "1:1" })
+    );
     const result = await synthesizeImagePrompt({
       history: [],
       userMessage: "watercolor mountain sunrise, soft pastel pinks",
       client,
     });
-    expect(result).toBe("a polished standalone image prompt");
+    expect(result.prompt).toBe("a polished standalone image prompt");
     const userBlock = client.chat.completions.create.mock.calls[0][0].messages[1]
       .content as string;
     expect(userBlock).toContain("watercolor mountain sunrise");

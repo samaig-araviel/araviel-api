@@ -1,4 +1,5 @@
 import type { ConversationMessage, Citation, SystemPromptParts, TokenUsage } from "@/lib/types";
+import type { ImageAspectRatio } from "@/lib/image-prompt-synthesis";
 
 export interface ProviderStreamEvent {
   type: "delta" | "thinking" | "citations" | "tool_use" | "image_generation" | "research_status" | "done" | "error";
@@ -35,6 +36,12 @@ export interface ProviderConfig {
    * `imageConfig.imageSize`). Ignored by text-only models.
    */
   imageQuality?: "standard" | "hd" | "ultra";
+  /**
+   * Aspect ratio for native image generation models. Providers map this to
+   * their own aspect-ratio parameter (e.g. Gemini's `imageConfig.aspectRatio`).
+   * Ignored by text-only models.
+   */
+  imageAspectRatio?: ImageAspectRatio;
 }
 
 export interface AIProvider {
