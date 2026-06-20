@@ -1,7 +1,7 @@
 import { generateOpenAIImage } from "./openai-image";
 import { generateGoogleImage } from "./google-image";
 import { generateStabilityImage } from "./stability-image";
-import type { ImageAspectRatio } from "@/lib/image-prompt-synthesis";
+import type { ImageAspectRatio } from "@/lib/image-aspect-ratio";
 
 export interface ImageGenResult {
   url: string;
