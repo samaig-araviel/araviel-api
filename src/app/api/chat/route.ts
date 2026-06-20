@@ -52,7 +52,7 @@ import {
   RESEARCH_MODE_LABELS,
 } from "@/lib/thinking-models";
 import { generateImage } from "@/lib/providers/image";
-import { synthesizeImagePrompt } from "@/lib/image-prompt-synthesis";
+import { synthesizeImagePrompt, type ImageAspectRatio } from "@/lib/image-prompt-synthesis";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
 import type { CreditBalance, ChargeResult } from "@/lib/credits";
@@ -527,9 +527,11 @@ async function handleChat(
       }
     }
 
-    const effectiveImagePrompt = enableImageGeneration
+    const synthesisResult = enableImageGeneration
       ? await synthesizeImagePrompt({ history, userMessage: chatReq.message })
-      : chatReq.message;
+      : { prompt: chatReq.message, aspectRatio: undefined };
+    const effectiveImagePrompt = synthesisResult.prompt;
+    const imageAspectRatio = synthesisResult.aspectRatio;
 
     const includeFileInstructions = detectFileIntent(chatReq.message);
     // Only ask the model to emit an <araviel_title> block when this is a
@@ -579,12 +581,14 @@ async function handleChat(
     const creditInfo: {
       userId: string;
       imageQuality: string;
+      imageAspectRatio?: ImageAspectRatio;
       wasImageGeneration: boolean;
       textCredits?: TextCreditState;
       preChargedResult?: ChargeResult;
     } = {
       userId: user.id,
       imageQuality: imageQuality,
+      imageAspectRatio: imageAspectRatio,
       wasImageGeneration: enableImageGeneration,
       textCredits: creditResult ?? undefined,
     };
@@ -593,7 +597,7 @@ async function handleChat(
     if (enableImageGeneration && isImageGenerationModel(model.id)) {
       const start = Date.now();
       try {
-        const imageResult = await generateImage(model.provider, model.id, effectiveImagePrompt, imageQuality as import("@/lib/providers/image").ImageQuality);
+        const imageResult = await generateImage(model.provider, model.id, effectiveImagePrompt, { quality: imageQuality as import("@/lib/providers/image").ImageQuality, aspectRatio: imageAspectRatio });
         const latencyMs = Date.now() - start;
 
         apiCallLogs.push({
@@ -724,7 +728,7 @@ async function handleChat(
 
           const backupStart = Date.now();
           try {
-            const backupImageResult = await generateImage(backup.provider, backup.id, effectiveImagePrompt, imageQuality as import("@/lib/providers/image").ImageQuality);
+            const backupImageResult = await generateImage(backup.provider, backup.id, effectiveImagePrompt, { quality: imageQuality as import("@/lib/providers/image").ImageQuality, aspectRatio: imageAspectRatio });
             const backupLatencyMs = Date.now() - backupStart;
 
             apiCallLogs.push({
@@ -875,7 +879,7 @@ async function handleChat(
           // Backup is a dedicated image model — use image generation API
           const start = Date.now();
           try {
-            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, effectiveImagePrompt, imageQuality as import("@/lib/providers/image").ImageQuality);
+            const imageResult = await generateImage(imageBackup.provider, imageBackup.id, effectiveImagePrompt, { quality: imageQuality as import("@/lib/providers/image").ImageQuality, aspectRatio: imageAspectRatio });
             const latencyMs = Date.now() - start;
 
             apiCallLogs.push({
@@ -1002,7 +1006,8 @@ async function handleChat(
             undefined, // titleContext — image backup path doesn't generate titles
             systemPromptParts,
             log,
-            imageQuality
+            imageQuality,
+            imageAspectRatio
           );
 
           if (backupResult.success) {
@@ -1102,7 +1107,8 @@ async function handleChat(
       titleContext,
       systemPromptParts,
       log,
-      imageQuality
+      imageQuality,
+      imageAspectRatio
     );
 
     // 13. If primary failed, try backup
@@ -1173,7 +1179,8 @@ async function handleChat(
           titleContext,
           systemPromptParts,
           log,
-          imageQuality
+          imageQuality,
+          imageAspectRatio
         );
 
         if (!backupResult.success) {
@@ -1363,7 +1370,7 @@ async function tryDedicatedImageFallback(
   conversationId?: string,
   messageId?: string,
   pendingImages?: PendingImageMeta[],
-  creditInfo?: { userId?: string; imageQuality?: string; preChargedResult?: ChargeResult }
+  creditInfo?: { userId?: string; imageQuality?: string; imageAspectRatio?: ImageAspectRatio; preChargedResult?: ChargeResult }
 ): Promise<StreamResult | null> {
   const log = logger.child({ route: "chat", subRoute: "dedicated-image-fallback" });
   for (const imgModel of FALLBACK_IMAGE_MODELS) {
@@ -1390,7 +1397,7 @@ async function tryDedicatedImageFallback(
         },
       });
 
-      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt, (creditInfo?.imageQuality ?? "standard") as import("@/lib/providers/image").ImageQuality);
+      const imageResult = await generateImage(imgModel.provider, imgModel.id, prompt, { quality: (creditInfo?.imageQuality ?? "standard") as import("@/lib/providers/image").ImageQuality, aspectRatio: creditInfo?.imageAspectRatio });
       const latencyMs = Date.now() - start;
 
       apiCallLogs.push({
@@ -1511,7 +1518,8 @@ async function streamFromProvider(
   titleContext?: TitleContext,
   systemPromptParts?: SystemPromptParts,
   parentLog?: Logger,
-  imageQuality?: "standard" | "hd" | "ultra"
+  imageQuality?: "standard" | "hd" | "ultra",
+  imageAspectRatio?: ImageAspectRatio
 ): Promise<StreamResult> {
   const log = (parentLog ?? logger).child({ subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
@@ -1565,6 +1573,7 @@ async function streamFromProvider(
       enableWebSearch,
       enableImageGeneration,
       imageQuality,
+      imageAspectRatio,
     });
 
     // Tail buffer to prevent <araviel_meta> and <araviel_title> blocks from

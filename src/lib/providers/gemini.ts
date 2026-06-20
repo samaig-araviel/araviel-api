@@ -297,7 +297,12 @@ export class GeminiProvider implements AIProvider {
       contents,
       config: {
         responseModalities: ["TEXT", "IMAGE"],
-        imageConfig: { imageSize: mapImageSize(config.imageQuality) },
+        imageConfig: {
+          imageSize: mapImageSize(config.imageQuality),
+          ...(config.imageAspectRatio
+            ? { aspectRatio: config.imageAspectRatio }
+            : {}),
+        },
       },
     });
 

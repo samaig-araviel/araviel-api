@@ -5,19 +5,50 @@ import type { ConversationMessage } from "@/lib/types";
 const SYNTHESIS_MODEL = "gpt-4o-mini";
 const SYNTHESIS_TIMEOUT_MS = 8000;
 const HISTORY_WINDOW = 10;
-const MAX_OUTPUT_TOKENS = 320;
+const MAX_OUTPUT_TOKENS = 400;
 const TEMPERATURE = 0.4;
+
+/**
+ * Aspect ratios the synthesizer is allowed to return. These map cleanly onto
+ * both Gemini's `imageConfig.aspectRatio` enum and OpenAI's gpt-image-2 size
+ * grid (see `aspectRatioToOpenAISize`).
+ */
+export type ImageAspectRatio =
+  | "1:1"
+  | "16:9"
+  | "9:16"
+  | "4:3"
+  | "3:4"
+  | "21:9"
+  | "9:21";
+
+const ASPECT_RATIO_VALUES: ReadonlySet<ImageAspectRatio> = new Set([
+  "1:1",
+  "16:9",
+  "9:16",
+  "4:3",
+  "3:4",
+  "21:9",
+  "9:21",
+]);
 
 const SYSTEM_PROMPT = `You compose prompts for an image-generation model.
 
-The user has been chatting and now wants an image. Read their most recent request and the prior conversation, then write ONE detailed image-generation prompt describing what should be drawn.
+The user has been chatting and now wants an image. Read their most recent request and the prior conversation, then write ONE detailed image-generation prompt describing what should be drawn, and pick the aspect ratio that best fits the intent.
 
-Rules:
-- Output ONLY the prompt itself. No preamble, no "Sure, here is...", no markdown, no quotes.
-- Focus on visual content: subject, style, composition, mood, palette, lighting, framing, format.
-- If the user's request is short or refers to prior context ("generate it", "make the image", "the flyer"), pull the relevant visual details from the conversation.
-- If the user's request is already a complete standalone prompt, polish it without injecting unrelated context.
-- 40 to 160 words. Single paragraph. No lists, no headings.`;
+Output strict JSON with exactly two fields:
+- "prompt": string. The image-generation prompt. 40 to 160 words, single paragraph, no lists or headings. Focus on visual content: subject, style, composition, mood, palette, lighting, framing.
+- "aspectRatio": one of "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "21:9" | "9:21". Pick based on explicit cues in the request:
+  • Portrait / vertical / Instagram Story / Reel / TikTok / 9:16 / 1080×1920 / phone wallpaper → "9:16"
+  • Landscape / horizontal / widescreen / desktop wallpaper / YouTube thumbnail / 16:9 / 1920×1080 → "16:9"
+  • Cinematic / ultrawide / banner → "21:9"
+  • Square / Instagram post / profile picture / 1:1 / 1024×1024 → "1:1"
+  • Standard photo landscape / 4:3 → "4:3"
+  • Standard photo portrait / 3:4 → "3:4"
+  • Very tall poster / vertical banner → "9:21"
+  • If the user didn't specify, default to "1:1".
+
+Do not include any text outside the JSON. If the user's request is already a complete standalone prompt, polish it without injecting unrelated context. If the request refers to prior context ("generate it", "the flyer"), pull the relevant visual details from the conversation.`;
 
 let cachedClient: OpenAI | null = null;
 
@@ -50,19 +81,43 @@ export interface SynthesizeImagePromptParams {
   client?: Pick<OpenAI, "chat">;
 }
 
+export interface SynthesizedImagePrompt {
+  prompt: string;
+  aspectRatio?: ImageAspectRatio;
+}
+
+function parseSynthesisOutput(raw: string): SynthesizedImagePrompt | null {
+  try {
+    const obj = JSON.parse(raw) as { prompt?: unknown; aspectRatio?: unknown };
+    if (typeof obj.prompt !== "string" || obj.prompt.trim().length === 0) {
+      return null;
+    }
+    const aspectRatio =
+      typeof obj.aspectRatio === "string" &&
+      ASPECT_RATIO_VALUES.has(obj.aspectRatio as ImageAspectRatio)
+        ? (obj.aspectRatio as ImageAspectRatio)
+        : undefined;
+    return { prompt: obj.prompt.trim(), aspectRatio };
+  } catch {
+    return null;
+  }
+}
+
 export async function synthesizeImagePrompt({
   history,
   userMessage,
   client: clientOverride,
-}: SynthesizeImagePromptParams): Promise<string> {
-  const fallback = userMessage.trim() || userMessage;
+}: SynthesizeImagePromptParams): Promise<SynthesizedImagePrompt> {
+  const fallback: SynthesizedImagePrompt = {
+    prompt: userMessage.trim() || userMessage,
+  };
   const client = clientOverride ?? getClient();
   if (!client) return fallback;
 
   const conversationText = formatHistoryForSynthesis(history);
   const userBlock = conversationText
-    ? `Conversation so far:\n\n${conversationText}\n\nUser's new request: ${userMessage}\n\nWrite the image-generation prompt.`
-    : `User's request: ${userMessage}\n\nWrite the image-generation prompt.`;
+    ? `Conversation so far:\n\n${conversationText}\n\nUser's new request: ${userMessage}\n\nWrite the image-generation prompt as JSON.`
+    : `User's request: ${userMessage}\n\nWrite the image-generation prompt as JSON.`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SYNTHESIS_TIMEOUT_MS);
@@ -77,13 +132,14 @@ export async function synthesizeImagePrompt({
         ],
         temperature: TEMPERATURE,
         max_tokens: MAX_OUTPUT_TOKENS,
+        response_format: { type: "json_object" },
       },
       { signal: controller.signal }
     );
 
-    const synthesized = completion.choices[0]?.message?.content?.trim();
-    if (synthesized && synthesized.length > 0) return synthesized;
-    return fallback;
+    const raw = completion.choices[0]?.message?.content?.trim();
+    if (!raw) return fallback;
+    return parseSynthesisOutput(raw) ?? fallback;
   } catch (err) {
     logger.warn("Image prompt synthesis failed; falling back to user message", {
       route: "chat",
