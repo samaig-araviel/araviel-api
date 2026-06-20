@@ -123,6 +123,11 @@ export class GeminiProvider implements AIProvider {
   }
 
   async *stream(config: ProviderConfig): AsyncGenerator<ProviderStreamEvent> {
+    if (GEMINI_IMAGE_GEN_MODELS.has(config.modelId)) {
+      yield* this.streamImageGen(config);
+      return;
+    }
+
     const isGemini3 = config.modelId.includes("3.") || config.modelId.includes("3-");
     const isGemini25 = config.modelId.includes("2.5");
     const complexity = config.enableThinking ? "demanding" : "standard";
@@ -148,9 +153,6 @@ export class GeminiProvider implements AIProvider {
 
     const contents = buildContents(config.messages);
 
-    // Only enable responseModalities for models that actually support native image gen
-    const supportsImageGen = config.enableImageGeneration && GEMINI_IMAGE_GEN_MODELS.has(config.modelId);
-
     const response = await this.ai.models.generateContentStream({
       model: config.modelId,
       contents,
@@ -158,9 +160,6 @@ export class GeminiProvider implements AIProvider {
         systemInstruction: config.systemPrompt,
         ...(tools.length > 0 ? { tools } : {}),
         ...(thinkingConfig ? { thinkingConfig } : {}),
-        ...(supportsImageGen
-          ? { responseModalities: ["TEXT", "IMAGE"] }
-          : {}),
       },
     });
 
@@ -254,5 +253,70 @@ export class GeminiProvider implements AIProvider {
     }
 
     yield { type: "done", usage, webSearchUsed };
+  }
+
+  /**
+   * Gemini image-gen models (Nano Banana family, Gemini 3 Pro Image, etc.) use
+   * a non-streaming `generateContent` call per Google's docs. They reject the
+   * `thinkingConfig`/`thinkingLevel` knobs the chat models accept (thinking
+   * for image gen is automatic), and the system instruction parameter is
+   * unused. Tools are limited to grounding which we don't expose here.
+   *
+   * We request both TEXT and IMAGE modalities so the model can return an
+   * optional caption alongside the inline image data; both are yielded as
+   * standard ProviderStreamEvents so the chat consumer doesn't need special
+   * handling.
+   */
+  private async *streamImageGen(
+    config: ProviderConfig
+  ): AsyncGenerator<ProviderStreamEvent> {
+    const contents = buildContents(config.messages);
+
+    const response = await this.ai.models.generateContent({
+      model: config.modelId,
+      contents,
+      config: {
+        responseModalities: ["TEXT", "IMAGE"],
+      },
+    });
+
+    const usage: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      cachedTokens: 0,
+    };
+
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      const p = part as Part & {
+        thought?: boolean;
+        text?: string;
+        inlineData?: { mimeType?: string; data?: string };
+      };
+
+      if (p.text && !p.thought) {
+        yield { type: "delta", content: p.text };
+      }
+      if (p.inlineData?.data) {
+        const mime = p.inlineData.mimeType ?? "image/png";
+        yield {
+          type: "image_generation",
+          imageUrl: `data:${mime};base64,${p.inlineData.data}`,
+        };
+      }
+    }
+
+    if (response.usageMetadata) {
+      usage.inputTokens = response.usageMetadata.promptTokenCount ?? 0;
+      usage.outputTokens = response.usageMetadata.candidatesTokenCount ?? 0;
+      usage.reasoningTokens =
+        (response.usageMetadata as { thoughtsTokenCount?: number })
+          .thoughtsTokenCount ?? 0;
+      usage.cachedTokens =
+        response.usageMetadata.cachedContentTokenCount ?? 0;
+    }
+
+    yield { type: "done", usage, webSearchUsed: false };
   }
 }
