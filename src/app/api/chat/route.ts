@@ -1001,7 +1001,8 @@ async function handleChat(
             chatReq.images,
             undefined, // titleContext — image backup path doesn't generate titles
             systemPromptParts,
-            log
+            log,
+            imageQuality
           );
 
           if (backupResult.success) {
@@ -1100,7 +1101,8 @@ async function handleChat(
       chatReq.images,
       titleContext,
       systemPromptParts,
-      log
+      log,
+      imageQuality
     );
 
     // 13. If primary failed, try backup
@@ -1170,7 +1172,8 @@ async function handleChat(
           chatReq.images,
           titleContext,
           systemPromptParts,
-          log
+          log,
+          imageQuality
         );
 
         if (!backupResult.success) {
@@ -1507,7 +1510,8 @@ async function streamFromProvider(
   uploadedImages?: ImageAttachment[],
   titleContext?: TitleContext,
   systemPromptParts?: SystemPromptParts,
-  parentLog?: Logger
+  parentLog?: Logger,
+  imageQuality?: "standard" | "hd" | "ultra"
 ): Promise<StreamResult> {
   const log = (parentLog ?? logger).child({ subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
@@ -1560,6 +1564,7 @@ async function streamFromProvider(
       enableThinking,
       enableWebSearch,
       enableImageGeneration,
+      imageQuality,
     });
 
     // Tail buffer to prevent <araviel_meta> and <araviel_title> blocks from
