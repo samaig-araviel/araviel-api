@@ -29,6 +29,12 @@ export interface ProviderConfig {
   enableThinking: boolean;
   enableWebSearch: boolean;
   enableImageGeneration?: boolean;
+  /**
+   * Requested image quality for native image generation models. Providers
+   * map this to their own size/resolution parameter (e.g. Gemini's
+   * `imageConfig.imageSize`). Ignored by text-only models.
+   */
+  imageQuality?: "standard" | "hd" | "ultra";
 }
 
 export interface AIProvider {

@@ -92,6 +92,26 @@ const GEMINI_IMAGE_GEN_MODELS = new Set([
   "gemini-3-pro-image-preview",
 ]);
 
+/**
+ * Map our `imageQuality` enum to Gemini's `imageConfig.imageSize`.
+ *
+ * Gemini image models support 1K, 2K, and 4K; the price scales with
+ * resolution ($0.067 / $0.101 / $0.151 per image for Nano Banana 2). We
+ * keep the cheapest tier as the default so an unspecified quality doesn't
+ * silently upgrade the user's bill.
+ */
+function mapImageSize(quality?: "standard" | "hd" | "ultra"): string {
+  switch (quality) {
+    case "ultra":
+      return "4K";
+    case "hd":
+      return "2K";
+    case "standard":
+    default:
+      return "1K";
+  }
+}
+
 function buildContents(messages: ConversationMessage[]): Content[] {
   return messages.map((msg) => {
     if (msg.images && msg.images.length > 0 && msg.role !== "assistant") {
@@ -277,6 +297,7 @@ export class GeminiProvider implements AIProvider {
       contents,
       config: {
         responseModalities: ["TEXT", "IMAGE"],
+        imageConfig: { imageSize: mapImageSize(config.imageQuality) },
       },
     });
 
