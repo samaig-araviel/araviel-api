@@ -100,7 +100,7 @@ export async function saveImageMetadata(meta: ImageMetadata): Promise<void> {
     message_id: meta.messageId,
     storage_path: meta.storagePath,
     public_url: meta.publicUrl,
-    prompt: meta.prompt?.slice(0, 500) || null,
+    prompt: meta.prompt || null,
     model: meta.model || null,
     provider: meta.provider || null,
     size: meta.size || null,
