@@ -62,6 +62,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gemini-2.5-flash-preview-04-17": { inputPerMillion: 0.3, outputPerMillion: 2.5 },
   "gemini-2.5-flash-lite": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
   "gemini-2.5-flash-lite-preview-06-17": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
+  "gemini-3.1-flash-image": { inputPerMillion: 0.5, outputPerMillion: 60 },
 
   // xAI
   "grok-4": { inputPerMillion: 3, outputPerMillion: 15 },

@@ -338,6 +338,7 @@ describe("canModelGenerateImages", () => {
     expect(canModelGenerateImages("gpt-4o")).toBe(true);
     expect(canModelGenerateImages("gpt-4.1")).toBe(true);
     expect(canModelGenerateImages("gpt-5.2")).toBe(true);
+    expect(canModelGenerateImages("gemini-3.1-flash-image")).toBe(true);
   });
 
   it("returns false for non-image models", () => {
