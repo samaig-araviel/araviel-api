@@ -1,5 +1,5 @@
 import type { ConversationMessage, Citation, SystemPromptParts, TokenUsage } from "@/lib/types";
-import type { ImageAspectRatio } from "@/lib/image-prompt-synthesis";
+import type { ImageAspectRatio } from "@/lib/image-aspect-ratio";
 
 export interface ProviderStreamEvent {
   type: "delta" | "thinking" | "citations" | "tool_use" | "image_generation" | "research_status" | "done" | "error";

@@ -52,7 +52,7 @@ import {
   RESEARCH_MODE_LABELS,
 } from "@/lib/thinking-models";
 import { generateImage } from "@/lib/providers/image";
-import { synthesizeImagePrompt, type ImageAspectRatio } from "@/lib/image-prompt-synthesis";
+import { detectImageAspectRatio, type ImageAspectRatio } from "@/lib/image-aspect-ratio";
 import { uploadImageToStorage, saveImageMetadata } from "@/lib/image-storage";
 import { canGenerate, chargeCredits, getBalance } from "@/lib/credits";
 import type { CreditBalance, ChargeResult } from "@/lib/credits";
@@ -527,11 +527,10 @@ async function handleChat(
       }
     }
 
-    const synthesisResult = enableImageGeneration
-      ? await synthesizeImagePrompt({ history, userMessage: chatReq.message })
-      : { prompt: chatReq.message, aspectRatio: undefined };
-    const effectiveImagePrompt = synthesisResult.prompt;
-    const imageAspectRatio = synthesisResult.aspectRatio;
+    const effectiveImagePrompt = chatReq.message;
+    const imageAspectRatio = enableImageGeneration
+      ? detectImageAspectRatio(chatReq.message)
+      : undefined;
 
     const includeFileInstructions = detectFileIntent(chatReq.message);
     // Only ask the model to emit an <araviel_title> block when this is a
