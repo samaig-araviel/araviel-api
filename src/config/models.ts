@@ -40,6 +40,14 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-image-1": { inputPerMillion: 0, outputPerMillion: 19 }, // retired 2026-10-23
   "sora-2": { inputPerMillion: 15, outputPerMillion: 60 }, // retired 2026-09-24
 
+  // Google Gemini — historical pricing retained for cost lookup on archived
+  // messages. These preview aliases are past their sunset date; live requests
+  // for the same model should use the GA IDs above (gemini-2.5-pro,
+  // gemini-2.5-flash, gemini-2.5-flash-lite). Same per-token rates as GA.
+  "gemini-2.5-pro-preview-05-06": { inputPerMillion: 1.25, outputPerMillion: 10 }, // preview retired 2026-05-06
+  "gemini-2.5-flash-preview-04-17": { inputPerMillion: 0.3, outputPerMillion: 2.5 }, // preview retired 2026-04-17
+  "gemini-2.5-flash-lite-preview-06-17": { inputPerMillion: 0.1, outputPerMillion: 0.4 }, // preview retired 2026-06-17
+
   // Anthropic
   "claude-opus-4-8": { inputPerMillion: 5, outputPerMillion: 25 },
   "claude-opus-4-7": { inputPerMillion: 5, outputPerMillion: 25 },
@@ -57,11 +65,8 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "gemini-3.5-flash": { inputPerMillion: 1.5, outputPerMillion: 9 },
   "gemini-3.1-flash-lite": { inputPerMillion: 0.25, outputPerMillion: 1.5 },
   "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10 },
-  "gemini-2.5-pro-preview-05-06": { inputPerMillion: 1.25, outputPerMillion: 10 },
   "gemini-2.5-flash": { inputPerMillion: 0.3, outputPerMillion: 2.5 },
-  "gemini-2.5-flash-preview-04-17": { inputPerMillion: 0.3, outputPerMillion: 2.5 },
   "gemini-2.5-flash-lite": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
-  "gemini-2.5-flash-lite-preview-06-17": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
   "gemini-3.1-flash-image": { inputPerMillion: 0.5, outputPerMillion: 60 },
 
   // xAI
