@@ -28,6 +28,9 @@ export const RETIRED_MODELS: Readonly<Record<string, string | null>> = Object.fr
   // GPT Image 1 — shutdown 2026-10-23
   "gpt-image-1": "gpt-image-2",
 
+  // Gemini 3.1 Flash Image preview (Nano Banana 2 preview) — shutdown 2026-06-25
+  "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
+
   // Sora 2 / Videos API — shutdown 2026-09-24, no replacement
   "sora-2": null,
   "sora-2-pro": null,

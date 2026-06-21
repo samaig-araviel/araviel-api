@@ -594,10 +594,11 @@ const NATIVE_IMAGE_GEN_MODELS = new Set([
   "gpt-5.4-pro",
   "gpt-5-nano",
   "o3",
-  // Google — responseModalities (only -image model variants)
+  // Google — responseModalities (only -image model variants).
+  // `gemini-3.1-flash-image-preview` was retired 2026-06-25 and is coerced to
+  // the GA `gemini-3.1-flash-image` upstream in retired-models.ts.
   "gemini-2.5-flash-image",
   "gemini-3.1-flash-image",
-  "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
 ]);
 
