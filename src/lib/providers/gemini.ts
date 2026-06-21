@@ -84,11 +84,16 @@ function getThinkingLevel(complexity: string): GeminiThinkingLevel {
   }
 }
 
-/** Models that support native image generation via responseModalities. */
+/**
+ * Models that support native image generation via responseModalities.
+ *
+ * `gemini-3.1-flash-image-preview` was retired 2026-06-25 and is coerced to
+ * the GA `gemini-3.1-flash-image` at the api boundary (see retired-models.ts),
+ * so the preview ID never reaches this set in practice.
+ */
 const GEMINI_IMAGE_GEN_MODELS = new Set([
   "gemini-2.5-flash-image",
   "gemini-3.1-flash-image",
-  "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
 ]);
 

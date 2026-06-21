@@ -26,6 +26,12 @@ describe("coerceModelId", () => {
     expect(coerceModelId("gpt-image-1")).toBe("gpt-image-2");
   });
 
+  it("maps the Nano Banana 2 preview to the GA gemini-3.1-flash-image", () => {
+    expect(coerceModelId("gemini-3.1-flash-image-preview")).toBe(
+      "gemini-3.1-flash-image"
+    );
+  });
+
   it("maps the Claude Opus 4.1 family to claude-opus-4-7", () => {
     expect(coerceModelId("claude-opus-4-1")).toBe("claude-opus-4-7");
     expect(coerceModelId("claude-opus-4-1-20250805")).toBe("claude-opus-4-7");
