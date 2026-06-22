@@ -5,6 +5,16 @@ import type { AuthenticatedUser } from "@/lib/auth";
 import type { DBMessage, Citation, ImageAttachment, ModelInfo, FollowUpQuestion } from "@/lib/types";
 import { corsHeaders, handleCorsOptions } from "../../../cors";
 
+interface GeneratedImagePayload {
+  id: string;
+  url: string;
+  prompt: string;
+  model: string;
+  provider: string;
+  size: string | null;
+  style: string | null;
+}
+
 interface FormattedMessage {
   id: string;
   conversationId: string;
@@ -28,6 +38,7 @@ interface FormattedMessage {
   followUps?: string[] | null;
   questions?: FollowUpQuestion[] | null;
   attachments?: ImageAttachment[] | null;
+  generatedImages?: GeneratedImagePayload[];
 }
 
 function formatMessage(msg: DBMessage): FormattedMessage {
@@ -139,14 +150,41 @@ export async function GET(
       );
     }
 
+    // Attach generated images (full prompts live here, not in the message body).
+    // Failure is non-fatal — messages still return, just without enriched image data.
+    const imagesByMessageId = new Map<string, GeneratedImagePayload[]>();
+    const { data: imageRows } = await supabase
+      .from("generated_images")
+      .select("id, message_id, public_url, prompt, model, provider, size, style")
+      .eq("conversation_id", conversationId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true });
+
+    for (const row of imageRows ?? []) {
+      if (!row.message_id || !row.public_url) continue;
+      const list = imagesByMessageId.get(row.message_id) ?? [];
+      list.push({
+        id: row.id,
+        url: row.public_url,
+        prompt: row.prompt ?? "",
+        model: row.model ?? "unknown",
+        provider: row.provider ?? "unknown",
+        size: row.size ?? null,
+        style: row.style ?? null,
+      });
+      imagesByMessageId.set(row.message_id, list);
+    }
+
     const messages = (data ?? []).map((msg) => {
       const formatted = formatMessage(msg as DBMessage);
       const messageFeedback = (msg as Record<string, unknown>).message_feedback as
         | { feedback: string }[]
         | null;
+      const images = imagesByMessageId.get(msg.id);
       return {
         ...formatted,
         feedback: messageFeedback?.[0]?.feedback ?? null,
+        ...(images && images.length > 0 ? { generatedImages: images } : {}),
       };
     });
 
