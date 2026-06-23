@@ -21,6 +21,7 @@ import {
   getOrCreateConversation,
   saveUserMessage,
   insertAssistantMessage,
+  upsertPartialAssistantMessage,
   updateConversationTimestamp,
   saveRoutingLog,
   saveApiCallLog,
@@ -1006,7 +1007,8 @@ async function handleChat(
             systemPromptParts,
             log,
             imageQuality,
-            imageAspectRatio
+            imageAspectRatio,
+            subConversationId
           );
 
           if (backupResult.success) {
@@ -1107,7 +1109,8 @@ async function handleChat(
       systemPromptParts,
       log,
       imageQuality,
-      imageAspectRatio
+      imageAspectRatio,
+      subConversationId
     );
 
     // 13. If primary failed, try backup
@@ -1179,7 +1182,8 @@ async function handleChat(
           systemPromptParts,
           log,
           imageQuality,
-          imageAspectRatio
+          imageAspectRatio,
+          subConversationId
         );
 
         if (!backupResult.success) {
@@ -1518,7 +1522,8 @@ async function streamFromProvider(
   systemPromptParts?: SystemPromptParts,
   parentLog?: Logger,
   imageQuality?: "standard" | "hd" | "ultra",
-  imageAspectRatio?: ImageAspectRatio
+  imageAspectRatio?: ImageAspectRatio,
+  subConversationId?: string
 ): Promise<StreamResult> {
   const log = (parentLog ?? logger).child({ subRoute: "stream-provider", provider: model.provider, model: model.id });
   const start = Date.now();
@@ -1684,12 +1689,35 @@ async function streamFromProvider(
       }
     }
 
+    // Persist a partial assistant row every ~2s while the stream is in flight.
+    // If Vercel maxDuration kills the function mid-response, the most recent
+    // partial save survives so a "Continue" follow-up can see the prior turn.
+    let lastPartialPersistAt = 0;
+    const PARTIAL_PERSIST_INTERVAL_MS = 2000;
+    const persistPartialIfDue = async (): Promise<void> => {
+      if (!conversationId || !messageId) return;
+      if (!content && !thinkingContent) return;
+      const now = Date.now();
+      if (now - lastPartialPersistAt < PARTIAL_PERSIST_INTERVAL_MS) return;
+      lastPartialPersistAt = now;
+      try {
+        await upsertPartialAssistantMessage(messageId, conversationId, {
+          content,
+          thinkingContent,
+          subConversationId,
+        });
+      } catch (err) {
+        log.warn("Partial assistant persist failed (non-fatal)", {}, err as Error);
+      }
+    };
+
     for await (const event of providerStream) {
       switch (event.type) {
         case "delta":
           if (event.content) {
             content += event.content;
             await flushSafeDelta(event.content);
+            await persistPartialIfDue();
           }
           break;
         case "thinking":
@@ -1699,6 +1727,7 @@ async function streamFromProvider(
               type: "thinking",
               data: { content: event.content },
             });
+            await persistPartialIfDue();
           }
           break;
         case "citations":
