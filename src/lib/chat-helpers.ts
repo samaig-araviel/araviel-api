@@ -233,26 +233,72 @@ export async function insertAssistantMessage(
 ): Promise<void> {
   const supabase = getSupabase();
 
-  const { error } = await supabase.from("messages").insert({
-    id: messageId,
-    conversation_id: conversationId,
-    sub_conversation_id: data.subConversationId ?? null,
-    role: "assistant",
-    content: data.content,
-    model_used: data.modelUsed,
-    tokens_input: data.usage.inputTokens,
-    tokens_output: data.usage.outputTokens,
-    tokens_reasoning: data.usage.reasoningTokens,
-    tokens_cached: data.usage.cachedTokens,
-    cost_usd: data.costUsd,
-    latency_ms: data.latencyMs,
-    ade_latency_ms: data.adeLatencyMs,
-    extended_data: data.extendedData,
-    created_at: new Date().toISOString(),
-  });
+  // Upsert: a partial row may already exist if the stream wrote progress saves
+  // before completion. The final write overwrites it with full metadata.
+  const { error } = await supabase.from("messages").upsert(
+    {
+      id: messageId,
+      conversation_id: conversationId,
+      sub_conversation_id: data.subConversationId ?? null,
+      role: "assistant",
+      content: data.content,
+      model_used: data.modelUsed,
+      tokens_input: data.usage.inputTokens,
+      tokens_output: data.usage.outputTokens,
+      tokens_reasoning: data.usage.reasoningTokens,
+      tokens_cached: data.usage.cachedTokens,
+      cost_usd: data.costUsd,
+      latency_ms: data.latencyMs,
+      ade_latency_ms: data.adeLatencyMs,
+      extended_data: data.extendedData,
+      created_at: new Date().toISOString(),
+    },
+    { onConflict: "id" }
+  );
 
   if (error) {
     throw new Error(`Failed to insert assistant message: ${error.message}`);
+  }
+}
+
+/**
+ * Persist the assistant message row mid-stream so that if the request is
+ * killed (Vercel maxDuration, network drop), the partial content is still
+ * recoverable for a follow-up "Continue" request. Called on a throttle from
+ * the stream loop. The row is marked `streamTimeout: true` in extended_data;
+ * `insertAssistantMessage` overwrites this on successful completion.
+ */
+export async function upsertPartialAssistantMessage(
+  messageId: string,
+  conversationId: string,
+  data: {
+    content: string;
+    thinkingContent?: string;
+    subConversationId?: string;
+  }
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const extendedData: Record<string, unknown> = { streamTimeout: true };
+  if (data.thinkingContent) {
+    extendedData.thinkingContent = data.thinkingContent;
+  }
+
+  const { error } = await supabase.from("messages").upsert(
+    {
+      id: messageId,
+      conversation_id: conversationId,
+      sub_conversation_id: data.subConversationId ?? null,
+      role: "assistant",
+      content: data.content,
+      extended_data: extendedData,
+      created_at: new Date().toISOString(),
+    },
+    { onConflict: "id" }
+  );
+
+  if (error) {
+    throw new Error(`Failed to upsert partial assistant message: ${error.message}`);
   }
 }
 
