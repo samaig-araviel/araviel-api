@@ -67,7 +67,7 @@ import { coerceModelId, RetiredModelError } from "@/lib/retired-models";
 import { requestContext } from "@/lib/request-context";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 export async function OPTIONS(request: NextRequest) {
   return handleCorsOptions(request.headers.get("origin"));
